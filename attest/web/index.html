@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ATTEST — Eval Gym for agent founders</title>
+<style>
+  :root{
+    --bg:#080b11; --panel:#0f141d; --panel2:#141b26; --line:#1e2733;
+    --text:#e6edf5; --muted:#8b9bb0; --dim:#5d6c80;
+    --mint:#4ade80; --amber:#fbbf24; --red:#f87171; --blue:#60a5fa; --violet:#a78bfa;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg); color:var(--text);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Inter",Segoe UI,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--blue)}
+  header{
+    display:flex;align-items:center;gap:16px;padding:14px 22px;
+    border-bottom:1px solid var(--line);background:linear-gradient(180deg,#0d121a,#0a0e14);
+    position:sticky;top:0;z-index:20;
+  }
+  .brand{display:flex;align-items:baseline;gap:10px}
+  .brand h1{margin:0;font-size:19px;letter-spacing:-.4px;font-weight:700}
+  .brand .tag{color:var(--muted);font-size:13px}
+  .brand b{color:var(--mint)}
+  .spacer{flex:1}
+  .pill{
+    font:11px/1 var(--mono);padding:5px 9px;border-radius:999px;
+    border:1px solid var(--line);color:var(--muted);background:var(--panel);
+    white-space:nowrap;
+  }
+  .pill.ok{color:var(--mint);border-color:#1d3f2e;background:#0e1a14}
+  .pill.bad{color:var(--red);border-color:#4a2020;background:#1a0e0e}
+  main{display:grid;grid-template-columns:330px 1fr;gap:0;height:calc(100vh - 53px)}
+  aside{border-right:1px solid var(--line);overflow-y:auto;padding:18px;background:#0a0e14}
+  section{padding:18px;margin-bottom:22px}
+  h2{font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:var(--dim);margin:0 0 12px;font-weight:600}
+  label{display:block;font-size:12px;color:var(--muted);margin:10px 0 5px}
+  input,select,textarea{
+    width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);
+    border-radius:8px;padding:9px 11px;font:13px var(--mono);outline:none;
+  }
+  input:focus,select:focus,textarea:focus{border-color:#2f4a63;box-shadow:0 0 0 3px rgba(96,165,250,.08)}
+  button{
+    background:var(--mint);color:#04140a;border:0;border-radius:8px;padding:11px 14px;
+    font:600 13px/1 inherit;cursor:pointer;width:100%;margin-top:12px;
+  }
+  button:hover{filter:brightness(1.08)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);font-weight:500}
+  .agent{
+    border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-bottom:9px;
+    cursor:pointer;background:var(--panel);transition:.15s;
+  }
+  .agent:hover{border-color:#2f4a63}
+  .agent.sel{border-color:var(--mint);background:#0d1a13;box-shadow:0 0 0 1px rgba(74,222,128,.2)}
+  .agent .n{font-weight:600;font-size:13px;margin-bottom:3px}
+  .agent .d{color:var(--muted);font-size:12px;line-height:1.4}
+  .right{overflow-y:auto;padding:0}
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);padding:0 18px;background:#0a0e14;position:sticky;top:0;z-index:10}
+  .tab{padding:12px 15px;font-size:13px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
+  .tab.on{color:var(--text);border-bottom-color:var(--mint)}
+  .pane{display:none;padding:18px}
+  .pane.on{display:block}
+  .scores{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px}
+  .score{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:13px 14px}
+  .score .k{font-size:10px;letter-spacing:1.2px;color:var(--dim);text-transform:uppercase}
+  .score .v{font:700 26px/1.2 var(--mono);margin:4px 0 6px}
+  .score .bar{height:4px;background:#1c2531;border-radius:3px;overflow:hidden}
+  .score .bar i{display:block;height:100%;background:var(--mint);border-radius:3px;transition:width .5s}
+  .score.adv .bar i{background:var(--amber)}
+  .score.con .bar i{background:var(--violet)}
+  .score.over .v{color:var(--mint)}
+  .task{border:1px solid var(--line);border-left-width:3px;border-radius:9px;margin-bottom:9px;background:var(--panel);overflow:hidden}
+  .task.pass{border-left-color:var(--mint)}
+  .task.fail{border-left-color:var(--red)}
+  .task.partial{border-left-color:var(--amber)}
+  .task.pending{border-left-color:var(--line)}
+  .task .hd{display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer}
+  .task .sl{font:10px/1 var(--mono);padding:4px 7px;border-radius:5px;letter-spacing:.6px;font-weight:600}
+  .sl.TASK{background:#0e2230;color:#7dd3fc}
+  .sl.ADVERSARIAL{background:#2a1f08;color:var(--amber)}
+  .sl.CONTAINMENT{background:#241433;color:#c4b5fd}
+  .task .ti{font-weight:600;font-size:13px;flex:1}
+  .task .vd{font:11px/1 var(--mono);padding:4px 8px;border-radius:5px}
+  .vd.pass{background:#0e1a14;color:var(--mint)}
+  .vd.fail{background:#1a0e0e;color:var(--red)}
+  .vd.partial{background:#1a1508;color:var(--amber)}
+  .task .bd{display:none;padding:0 14px 14px;border-top:1px solid var(--line)}
+  .task.open .bd{display:block}
+  pre{background:#070a0f;border:1px solid var(--line);border-radius:8px;padding:11px;overflow:auto;
+      font:12px/1.55 var(--mono);margin:8px 0;color:#cbd5e1;max-height:290px;white-space:pre-wrap;word-break:break-word}
+  .kv{font:12px/1.7 var(--mono);color:var(--muted)}
+  .kv b{color:var(--text);font-weight:500}
+  .rad{display:grid;gap:7px;margin:8px 0}
+  .rad .r{display:flex;align-items:center;gap:9px;font:12px var(--mono)}
+  .rad .dot{width:9px;height:9px;border-radius:50%;background:var(--mint);flex:none}
+  .rad .dot.amber{background:var(--amber)} .rad .dot.red{background:var(--red)}
+  .rad .dot.violet{background:var(--violet)}
+  .rad .bar{flex:1;height:5px;background:#1c2531;border-radius:3px;overflow:hidden}
+  .rad .bar i{display:block;height:100%;background:var(--mint)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line)}
+  th{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--dim);font-weight:600}
+  td.num{font:13px var(--mono);text-align:right}
+  .rank{font:700 13px var(--mono);color:var(--dim);width:34px}
+  .m0{color:var(--mint)} .m1{color:var(--amber)} .m2{color:var(--red)}
+  .board{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .chip{padding:5px 10px;border-radius:6px;font:11px var(--mono);border:1px solid var(--line);color:var(--muted)}
+  .chip.fixed{color:var(--mint);border-color:#1d3f2e;background:#0e1a14}
+  .chip.regressed{color:var(--red);border-color:#4a2020;background:#1a0e0e}
+  .muted{color:var(--muted)}
+  .small{font-size:12px}
+  .mono{font-family:var(--mono)}
+  .empty{color:var(--dim);padding:34px 0;text-align:center;font-size:13px}
+  .flash{animation:fl .9s ease-out}
+  @keyframes fl{0%{background:#1a1010}100%{background:transparent}}
+  .btns{display:flex;gap:8px;margin-top:10px}
+  .btns button{margin:0}
+  .toast{position:fixed;right:18px;bottom:18px;background:var(--panel2);border:1px solid var(--line);
+         border-radius:9px;padding:11px 15px;font-size:13px;opacity:0;transition:.3s;pointer-events:none;z-index:50}
+  .toast.on{opacity:1;transform:translateY(-4px)}
+  details summary{cursor:pointer;color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <h1>ATTEST</h1>
+    <span class="tag">Eval gym for agent founders — <b>don't demo vibes, publish a score</b></span>
+  </div>
+  <div class="spacer"></div>
+  <span class="pill" id="p-runtime">runtime …</span>
+  <span class="pill" id="p-infer">inference …</span>
+  <span class="pill" id="p-url" style="display:none"></span>
+</header>
+
+<main>
+  <aside>
+    <section>
+      <h2>1 · Drop your agent</h2>
+      <div id="agents"></div>
+      <details style="margin-top:10px">
+        <summary>+ bring your own agent (OpenAI-compatible endpoint)</summary>
+        <label>Name</label><input id="c-name" value="my agent" />
+        <label>Base URL</label><input id="c-url" placeholder="https://api.vultrinference.com/v1" />
+        <label>Model</label><input id="c-model" placeholder="qwen3.8-flash-next" />
+        <label>API key (stays server-side)</label><input id="c-key" type="password" />
+      </details>
+    </section>
+
+    <section>
+      <h2>2 · Suite</h2>
+      <label>Topic</label>
+      <input id="s-topic" value="data analysis and reporting" />
+      <div class="btns">
+        <button class="ghost" id="b-seeded">Use seeded suite</button>
+        <button class="ghost" id="b-generate">Generate with model</button>
+      </div>
+      <div class="kv" style="margin-top:10px" id="s-info">suite: —</div>
+    </section>
+
+    <section>
+      <h2>3 · Run</h2>
+      <button id="b-run">Run suite</button>
+      <div class="kv" style="margin-top:10px" id="run-info"></div>
+    </section>
+
+    <section>
+      <h2>Containment lab</h2>
+      <button class="ghost" id="b-selftest">Run attack corpus live</button>
+      <div id="selftest-out" class="kv" style="margin-top:10px"></div>
+    </section>
+  </aside>
+
+  <div class="right">
+    <div class="tabs">
+      <div class="tab on" data-p="run">Run</div>
+      <div class="tab" data-p="board">Leaderboard</div>
+      <div class="tab" data-p="reg">Regression board</div>
+      <div class="tab" data-p="evidence">Evidence</div>
+    </div>
+
+    <div class="pane on" id="p-run">
+      <div class="scores" id="scores"></div>
+      <div id="tasks"><div class="empty">No run yet. Drop an agent and press <b>Run suite</b>.</div></div>
+    </div>
+
+    <div class="pane" id="p-board">
+      <div class="empty" id="board-empty">No scores published yet.</div>
+      <table id="board-table" style="display:none">
+        <thead><tr><th></th><th>Agent</th><th class="num">TASK</th><th class="num">ADV</th><th class="num">CONTAIN</th><th class="num">OVERALL</th><th></th></tr></thead>
+        <tbody id="board-body"></tbody>
+      </table>
+    </div>
+
+    <div class="pane" id="p-reg">
+      <div class="board" id="reg-chips"></div>
+      <div class="kv" style="margin-bottom:10px">Pick two runs of the same agent to see what changed.</div>
+      <table id="reg-table" style="display:none">
+        <thead><tr><th>Task</th><th>Slice</th><th>Status</th><th>Before</th><th>After</th></tr></thead>
+        <tbody id="reg-body"></tbody>
+      </table>
+    </div>
+
+    <div class="pane" id="p-evidence">
+      <div class="kv" style="margin-bottom:10px">Every run is a hash-chained ledger. Edit one event and the chain breaks — that is the point.</div>
+      <pre id="ev-out">select a run</pre>
+    </div>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+
+let agents = [], selected = null, suiteId = null, currentRun = null, runs = [];
+
+function toast(msg){
+  const t = $("#toast"); t.textContent = msg; t.classList.add("on");
+  clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove("on"), 2600);
+}
+async function api(path, opts){
+  const r = await fetch(path, opts);
+  if(!r.ok) throw new Error((await r.text()).slice(0,200));
+  return r.json();
+}
+
+// --- boot
+(async function boot(){
+  try{
+    const h = await api("/api/health");
+    $("#p-runtime").textContent = "runtime " + h.runtime;
+    $("#p-runtime").className = "pill " + (h.runtime==="runsc" ? "ok" : "");
+    const inf = h.inference || {};
+    $("#p-infer").textContent = inf.ok ? "inference ok · " + inf.model : "inference offline";
+    $("#p-infer").className = "pill " + (inf.ok ? "ok" : "bad");
+  }catch(e){ $("#p-infer").textContent = "api offline"; $("#p-infer").className="pill bad"; }
+
+  const a = await api("/api/agents");
+  agents = a.reference;
+  $("#agents").innerHTML = agents.map(x=>`
+    <div class="agent" data-id="${x.id}">
+      <div class="n">${esc(x.name)}</div>
+      <div class="d">${esc(x.description)}</div>
+    </div>`).join("");
+  $$(".agent").forEach(el=>el.onclick=()=>{
+    $$(".agent").forEach(x=>x.classList.remove("sel"));
+    el.classList.add("sel"); selected = el.dataset.id;
+    $("#run-info").innerHTML = `agent: <b>${esc(selected)}</b>`;
+  });
+  if(agents.length){ $$(".agent")[1].click(); }
+
+  const s = await api("/api/suite/seeded");
+  suiteId = s.suite_id;
+  $("#s-info").innerHTML = `suite: <b>${s.source}</b> · ${s.tasks.length} tasks · <span class="mono">${s.version}</span>`;
+
+  refreshBoard();
+})();
+
+$$(".tab").forEach(t=>t.onclick=()=>{
+  $$(".tab").forEach(x=>x.classList.remove("on")); t.classList.add("on");
+  $$(".pane").forEach(p=>p.classList.remove("on"));
+  $("#p-"+t.dataset.p).classList.add("on");
+  if(t.dataset.p==="board") refreshBoard();
+  if(t.dataset.p==="reg") buildRegPicker();
+});
+
+$("#b-seeded").onclick = async ()=>{
+  const s = await api("/api/suite/seeded"); suiteId = s.suite_id;
+  $("#s-info").innerHTML = `suite: <b>${s.source}</b> · ${s.tasks.length} tasks · <span class="mono">${s.version}</span>`;
+  toast("seeded suite loaded");
+};
+$("#b-generate").onclick = async ()=>{
+  toast("generating suite…");
+  const s = await api("/api/suite", {method:"POST", headers:{"content-type":"application/json"},
+    body: JSON.stringify({topic:$("#s-topic").value, generate:true})});
+  suiteId = s.suite_id;
+  $("#s-info").innerHTML = `suite: <b>${s.source}</b> · ${s.tasks.length} tasks · <span class="mono">${s.version}</span>`;
+  toast(`suite ready (${s.source})`);
+};
+
+// --- run
+$("#b-run").onclick = async ()=>{
+  const btn = $("#b-run"); btn.disabled = true; btn.textContent = "running…";
+  $("#tasks").innerHTML = ""; $("#scores").innerHTML = "";
+  try{
+    const body = { agent_id: selected, suite_id: suiteId, public: true };
+    const url = $("#c-url").value.trim();
+    if(url){ body.custom = { name:$("#c-name").value||"my agent", base_url:url,
+      model:$("#c-model").value||"qwen3.8-flash-next", api_key:$("#c-key").value, style:"compliant" }; }
+    const started = await api("/api/run", {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(body)});
+    currentRun = started.run_id;
+    $("#run-info").innerHTML = `run: <b class="mono">${currentRun}</b><br>agent: ${esc(started.agent.name)}`;
+    listen(currentRun);
+  }catch(e){ toast("run failed: " + e.message); }
+  finally{ btn.disabled=false; btn.textContent="Run suite"; }
+};
+
+function listen(runId){
+  const es = new EventSource("/api/run/"+runId+"/events");
+  es.onmessage = ev=>{
+    const d = JSON.parse(ev.data);
+    if(d.type==="task_started") addTask(d.task);
+    if(d.type==="task_finished") fillTask(d.result);
+    if(d.type==="run_finished"){ showScores(d.result.scores); finish(d.result); }
+    if(d.type==="run_error") toast("error: "+d.error);
+  };
+  es.onerror = ()=>{ es.close(); };
+}
+
+function addTask(task){
+  if($("#tasks").querySelector(".empty")) $("#tasks").innerHTML="";
+  const el = document.createElement("div");
+  el.className="task pending"; el.id = "t-"+task.id;
+  el.innerHTML = `
+    <div class="hd">
+      <span class="sl ${task.slice}">${task.slice}</span>
+      <span class="ti">${esc(task.title)}</span>
+      <span class="vd" id="vd-${task.id}">…</span>
+    </div>
+    <div class="bd"><div class="kv">oracle <b>${esc(task.oracle.type)}</b> · <span class="mono">${esc(JSON.stringify(task.oracle))}</span></div></div>`;
+  el.querySelector(".hd").onclick = ()=> el.classList.toggle("open");
+  $("#tasks").appendChild(el);
+}
+
+function fillTask(r){
+  const el = document.getElementById("t-"+r.task.id); if(!el) return;
+  const w = r.verdict.weight;
+  const cls = r.verdict.passed ? (w>=1?"pass":"partial") : "fail";
+  el.className = "task "+cls;
+  el.querySelector(".bd").innerHTML = `
+    <div class="kv"><b>Prompt</b></div><pre>${esc(r.task.prompt)}</pre>
+    <div class="kv"><b>Agent code</b></div><pre>${esc(r.outcome.code || r.outcome.error || "(no code)")}</pre>
+    ${r.outcome.stdout ? `<div class="kv"><b>stdout</b></div><pre>${esc(r.outcome.stdout)}</pre>` : ""}
+    ${r.outcome.stderr ? `<div class="kv"><b>stderr</b></div><pre>${esc(r.outcome.stderr)}</pre>` : ""}
+    ${r.outcome.artifacts && r.outcome.artifacts.length ? `<div class="kv"><b>Artifacts</b></div><pre>${esc(r.outcome.artifacts.map(a=>a.path+"  "+a.size+"B  sha256:"+a.sha256.slice(0,16)).join("\n"))}</pre>` : ""}
+    <div class="kv"><b>Verdict</b> — ${esc(r.verdict.detail)}${r.containment && r.containment.classes && r.containment.classes.length ? `<br>capabilities: <b>${esc(r.containment.classes.join(", "))}</b>` : ""}</div>`;
+  el.classList.add("flash");
+  const vd = el.querySelector(".vd");
+  vd.className = "vd "+cls;
+  vd.textContent = r.containment.outcome==="contained" ? "CONTAINED" : (r.verdict.passed ? "PASS" : "FAIL");
+}
+
+function showScores(s){
+  if(!s) return;
+  const box = $("#scores"); box.innerHTML = "";
+  const rows = [["TASK","TASK",""],["ADVERSARIAL","ADVERSARIAL","adv"],["CONTAINMENT","CONTAINMENT","con"],["OVERALL","OVERALL","over"]];
+  for(const [k,label,cls] of rows){
+    const v = s[k] ?? 0;
+    const d = document.createElement("div");
+    d.className = "score "+cls;
+    d.innerHTML = `<div class="k">${label}</div><div class="v">${v}</div><div class="bar"><i style="width:${Math.max(0,Math.min(100,v))}%"></i></div>`;
+    box.appendChild(d);
+  }
+}
+
+async function finish(run){
+  toast("run complete");
+  currentRun = run.run_id;
+  refreshBoard();
+  try{
+    const ev = await api("/api/evidence/"+run.run_id);
+    $("#ev-out").textContent = JSON.stringify(ev, null, 2);
+  }catch(e){}
+}
+
+// --- leaderboard
+async function refreshBoard(){
+  try{
+    const b = await api("/api/leaderboard");
+    runs = b.rows;
+    if(!runs.length){ $("#board-empty").style.display=""; $("#board-table").style.display="none"; return; }
+    $("#board-empty").style.display="none"; $("#board-table").style.display="";
+    $("#board-body").innerHTML = runs.map(r=>{
+      const s=r.scores||{};
+      return `<tr>
+        <td class="rank">${r.rank}</td>
+        <td><b>${esc(r.agent_name)}</b><br><span class="muted small">${esc(r.agent_style)} · ${r.chain_valid?"chain ok":"chain BROKEN"}</span></td>
+        <td class="num ${s.TASK>=80?"m0":s.TASK>=50?"m1":"m2"}">${s.TASK??0}</td>
+        <td class="num ${s.ADVERSARIAL>=80?"m0":s.ADVERSARIAL>=50?"m1":"m2"}">${s.ADVERSARIAL??0}</td>
+        <td class="num ${s.CONTAINMENT>=80?"m0":s.CONTAINMENT>=50?"m1":"m2"}">${s.CONTAINMENT??0}</td>
+        <td class="num"><b>${s.OVERALL??0}</b></td>
+        <td><a class="small" href="#" data-run="${r.run_id}" data-ev="1">evidence</a></td>
+      </tr>`;
+    }).join("");
+    $$("#board-body a").forEach(a=>a.onclick=async e=>{
+      e.preventDefault();
+      $$(".tab").forEach(x=>x.classList.remove("on"));
+      $$(".pane").forEach(p=>p.classList.remove("on"));
+      $("#p-evidence").classList.add("on");
+      const ev = await api("/api/evidence/"+a.dataset.run);
+      $("#ev-out").textContent = JSON.stringify(ev, null, 2);
+    });
+  }catch(e){}
+}
+
+// --- regression board
+async function buildRegPicker(){
+  if(!runs.length) await refreshBoard();
+  const byAgent = {};
+  runs.forEach(r=>{ (byAgent[r.agent_id] ||= []).push(r); });
+  const opts = Object.entries(byAgent).map(([aid, rs])=>{
+    const rs2 = rs.slice().sort((a,b)=>a.created_at-b.created_at);
+    const first = rs2[0], last = rs2[rs2.length-1];
+    const opts2 = rs2.map(r=>`<option value="${r.run_id}">${r.run_id.slice(4,12)} · ${new Date(r.created_at*1000).toLocaleTimeString()} · ${r.scores.OVERALL}</option>`).join("");
+    return `<div style="margin-bottom:14px"><label>${esc(aid)}</label>
+      <select class="reg-sel" data-agent="${aid}">${opts2}</select></div>`;
+  }).join("");
+  $("#reg-chips").innerHTML = opts;
+  $$(".reg-sel").forEach(sel=>sel.onchange=()=>doCompare());
+  doCompare();
+}
+async function doCompare(){
+  const sels = $$(".reg-sel");
+  if(sels.length<2) return;
+  const base = sels[0].value, head = sels[sels.length-1].value;
+  if(base===head){ $("#reg-body").innerHTML=""; $("#reg-table").style.display="none"; return; }
+  const c = await api(`/api/compare?base=${base}&head=${head}`);
+  $("#reg-table").style.display="";
+  $("#reg-body").innerHTML = c.rows.map(r=>{
+    const cls = r.status==="fixed"?"m0":r.status==="regressed"?"m2":"";
+    return `<tr><td>${esc(r.title)}</td><td><span class="sl ${r.slice}">${r.slice}</span></td>
+      <td class="${cls}">${r.status}</td><td>${r.base_passed===null?"—":r.base_passed?"PASS":"FAIL"}</td>
+      <td>${r.head_passed?"PASS":"FAIL"}</td></tr>`;
+  }).join("");
+}
+
+// --- containment lab
+$("#b-selftest").onclick = async ()=>{
+  $("#selftest-out").innerHTML = "running corpus…";
+  try{
+    const r = await api("/api/selftest");
+    $("#selftest-out").innerHTML = `<b style="color:${r.contained===r.total?"var(--mint)":"var(--red)"}">${r.contained}/${r.total} contained</b>
+      <div class="rad">` + r.results.map(x=>`
+      <div class="r"><span class="dot ${x.contained?"":"red"}"></span>
+      <span style="width:120px">${esc(x.id)}</span>
+      <span class="bar"><i style="width:${x.contained?100:6}%;background:${x.contained?"var(--mint)":"var(--red)"}"></i></span>
+      <span class="muted">${esc(x.evidence.slice(0,44))}</span></div>`).join("") + `</div>`;
+  }catch(e){ $("#selftest-out").textContent = "error: "+e.message; }
+};
+</script>
+</body>
+</html>

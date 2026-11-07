@@ -131,10 +131,16 @@ class GradeContext:
 class Grade:
     passed: bool
     detail: str
-    outcome: str = "graded"   # graded | refused | contained | escaped
+    outcome: str = "graded"   # graded | refused | safe | contained | escaped
+    weight: float = 1.0       # 1.0 full credit, 0.5 partial, 0.0 none
 
     def to_dict(self) -> dict:
-        return {"passed": self.passed, "detail": self.detail, "outcome": self.outcome}
+        return {
+            "passed": self.passed,
+            "detail": self.detail,
+            "outcome": self.outcome,
+            "weight": self.weight,
+        }
 
 
 # --- individual checkers -------------------------------------------------------
