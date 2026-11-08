@@ -18,12 +18,12 @@ import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import gym, llm
-from .agent import AgentSpec, reference_agents
+from .agent import AGENT_ALIASES, AgentSpec, reference_agents
 from .attacks import ATTACK_CORPUS
 from .ledger import Ledger
 from .sandbox import detect_runtime
@@ -50,17 +50,11 @@ STREAMS: dict[str, queue.Queue] = {}
 for path in sorted(RUNS_DIR.glob("*.json")):
     try:
         data = json.loads(path.read_text())
-        run = gym.RunResult(
-            run_id=data["run_id"], agent_id=data["agent_id"], agent_name=data["agent_name"],
-            agent_style=data.get("agent_style", "compliant"),
-            suite_version=data.get("suite_version", ""), suite_source=data.get("suite_source", "seeded"),
-            created_at=data.get("created_at", 0), duration_ms=data.get("duration_ms", 0),
-            scores=data.get("scores", {}), ledger_head=data.get("ledger_head", ""),
-            chain_valid=data.get("chain_valid", True), public=data.get("public", True),
-        )
-        RUNS[run.run_id] = run
     except Exception:
         continue
+    run = gym.run_from_dict(data)
+    if run is not None:
+        RUNS[run.run_id] = run
 
 
 # --- request models -------------------------------------------------------------
@@ -81,16 +75,58 @@ class CustomAgent(BaseModel):
     style: str = "compliant"
 
 
+class EndpointSpec(BaseModel):
+    """An OpenAI-compatible endpoint for a dropped-in agent."""
+    base_url: str
+    model: str = ""
+    api_key: str = ""
+    style: str = "compliant"
+
+
+class AgentPayload(BaseModel):
+    """The frozen POST /api/run agent object: {endpoint?, name}."""
+    name: str = "compliant"
+    endpoint: EndpointSpec | None = None
+
+
 class RunRequest(BaseModel):
-    agent_id: str = "compliant"
+    # Frozen shape (docs/adal/spec.md): {agent: {endpoint?, name}, tasks?: [ids]}
+    agent: AgentPayload | None = None
+    tasks: list[str] | None = None
+    # Legacy shape, still accepted so the existing UI keeps working.
+    agent_id: str | None = None
     custom: CustomAgent | None = None
     suite_id: str | None = None
     public: bool = True
 
 
+class PromoteRequest(BaseModel):
+    run_id: str
+    task_id: str
+
+
 # --- helpers --------------------------------------------------------------------
 
 def _agent_for(req: RunRequest) -> AgentSpec:
+    refs = reference_agents()
+    if req.agent is not None:
+        a = req.agent
+        if a.endpoint is not None:
+            e = a.endpoint
+            return AgentSpec(
+                id="custom-" + uuid.uuid4().hex[:6],
+                name=a.name or "dropped-in agent",
+                model=e.model or llm.MODEL_SUITE,
+                base_url=e.base_url.rstrip("/"),
+                api_key=e.api_key,
+                style=e.style,
+                description="Agent dropped into the gym by the user.",
+            )
+        want = AGENT_ALIASES.get(a.name, a.name)
+        for ref in refs:
+            if want in (ref.id, ref.name) or want == ref.name.split(" ")[0]:
+                return ref
+        raise HTTPException(status_code=400, detail=f"unknown agent '{a.name}'")
     if req.custom is not None:
         c = req.custom
         return AgentSpec(
@@ -102,16 +138,27 @@ def _agent_for(req: RunRequest) -> AgentSpec:
             style=c.style,
             description="Agent dropped into the gym by the user.",
         )
-    for a in reference_agents():
-        if a.id == req.agent_id:
+    want = AGENT_ALIASES.get(req.agent_id or "compliant", req.agent_id or "compliant")
+    for a in refs:
+        if a.id == want:
             return a
     raise HTTPException(status_code=400, detail=f"unknown agent '{req.agent_id}'")
 
 
 def _suite_for(req: RunRequest) -> tuple[list[Task], str]:
     if req.suite_id and req.suite_id in SUITES:
-        return SUITES[req.suite_id], SUITE_META[req.suite_id].get("source", "cached")
-    return list(SEEDED_SUITE), "seeded"
+        tasks = list(SUITES[req.suite_id])
+        source = SUITE_META[req.suite_id].get("source", "cached")
+    else:
+        tasks = list(SEEDED_SUITE)
+        source = "seeded"
+    if req.tasks:
+        by_id = {t.id: t for t in tasks}
+        missing = [tid for tid in req.tasks if tid not in by_id]
+        if missing:
+            raise HTTPException(status_code=400, detail=f"unknown task ids: {missing}")
+        tasks = [by_id[tid] for tid in req.tasks]
+    return tasks, source
 
 
 def _persist(run: gym.RunResult) -> None:
@@ -239,10 +286,29 @@ async def stream_events(run_id: str):
 
 @app.get("/api/run/{run_id}")
 def get_run(run_id: str):
+    """The frozen 4-layer scorecard shape (docs/adal/spec.md)."""
+    run = RUNS.get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="unknown run")
+    return gym.run_view(run, list(RUNS.values()))
+
+
+@app.get("/api/run/{run_id}/detail")
+def get_run_detail(run_id: str):
+    """Full verbose run detail (the pre-frozen shape), for deep dives."""
     run = RUNS.get(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="unknown run")
     return run.to_dict()
+
+
+@app.get("/api/run/{run_id}/otel.json")
+def run_otel(run_id: str):
+    """OTLP/JSON trace export; importable into Arize Phoenix."""
+    run = RUNS.get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="unknown run")
+    return gym.otel_export(run, list(RUNS.values()))
 
 
 @app.get("/api/scorecard/{run_id}")
@@ -255,7 +321,35 @@ def scorecard(run_id: str):
 
 @app.get("/api/leaderboard")
 def board():
-    return {"rows": gym.leaderboard(list(RUNS.values()))}
+    runs = list(RUNS.values())
+    return {
+        "rows": gym.agent_leaderboard(runs),      # frozen shape: one row per agent
+        "detail_rows": gym.leaderboard(runs),     # supplementary: one row per run
+    }
+
+
+@app.post("/api/regression/promote")
+def promote_regression(req: PromoteRequest):
+    """Promote Failure to Regression Suite: a failed or contained trace
+    becomes a permanent test case, verbatim."""
+    run = RUNS.get(req.run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"unknown run '{req.run_id}'")
+    tr = next((t for t in run.tasks if t.task.id == req.task_id), None)
+    if tr is None:
+        raise HTTPException(status_code=404,
+                            detail=f"task '{req.task_id}' not in run '{req.run_id}'")
+    passed_clean = tr.verdict.passed and (tr.containment or {}).get("outcome") in ("refused", "safe")
+    if passed_clean:
+        raise HTTPException(status_code=400,
+                            detail="only failed or contained traces can be promoted")
+    case_id, created = LEDGER.save_regression_case(gym.build_regression_case(run, tr))
+    return {"regression_case_id": case_id, "created": created}
+
+
+@app.get("/api/regression/cases")
+def regression_cases():
+    return {"cases": LEDGER.regression_cases()}
 
 
 @app.get("/api/compare")

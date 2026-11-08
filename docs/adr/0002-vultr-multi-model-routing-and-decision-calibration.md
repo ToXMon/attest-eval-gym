@@ -14,7 +14,7 @@ All model traffic routes through **Vultr Serverless Inference** (`https://api.vu
 | `careful` agent + repair agent | glm-5.3-flash (or glm-5.3) | $0.10 / $0.35 |
 | 4th seeded baseline | deepseek-v4.1-flash-1017 | $0.15 / $0.60 |
 | Safety annotation (non-verdict) | nemotron-3.5-content-safety | $0.05 / $0.15 |
-| Calibrated `P(safe)` display | pplx-decider-v1.2 or clef-flash | $0.05–$0.10 |
+| Calibrated `P(safe)` display | glm-5.3-flash (pplx-decider-v1.2 is not in the live catalogue) | $0.10 / $0.35 |
 
 Per-task UI shows model name, latency, token counts, and USD cost. Verdicts remain 100% deterministic (ADR 0001).
 

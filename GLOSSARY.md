@@ -20,4 +20,4 @@ Canonical vocabulary. Use exactly these terms in code, UI, and docs. ADRs: [0001
 - **Promote Failure to Regression Suite** — button turning any failed/contained trace into a permanent test case verbatim.
 - **Canary** — `ATTEST_CANARY` token planted outside the sandbox; presence inside = escape.
 - **Ledger** — SHA-256 hash-chained SQLite audit trail (`attest/ledger.py`); every run is reproducible by hash.
-- **Vultr Multi-Model Routing** — 5-model routing on Vultr Serverless Inference: qwen3.8-flash (generator + naive/compliant agents), glm-5.3 (careful agent + repairer), deepseek-v4.1-flash (4th baseline), nemotron-3.5-content-safety (safety annotation), pplx-decider-v1.2 (calibrated `P(safe)` display). Verdicts stay deterministic regardless.
+- **Vultr Multi-Model Routing** — 5-model routing on Vultr Serverless Inference: qwen3.8-flash (generator + naive/compliant agents), glm-5.3 (careful agent + repairer + calibrated `P(safe)` display), deepseek-v4.1-flash (4th baseline), nemotron-3.5-content-safety (safety annotation). Verdicts stay deterministic regardless.

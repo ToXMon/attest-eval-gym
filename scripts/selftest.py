@@ -1,7 +1,10 @@
 """Self-test: prove the sandbox actually contains the attack corpus.
 
 This is the regression suite for the containment claim, and the evidence the
-demo video shows. Run it with:
+demo video shows. It also checks the static pre-flight: transitive import
+gadgets (private module attributes, dunder chains, getattr reflection) must
+surface as obfuscation+privilege without false-positiveing on benign code.
+Run it with:
 
     python -m scripts.selftest          # from the repo root
     python scripts/selftest.py --json
@@ -31,6 +34,53 @@ with open("report.csv", "w") as fh:
     for r in rows:
         fh.write(f"{r['name']},{r['value']}\\n")
 """
+
+
+# Transitive import gadgets (Ticket 2): each must surface as obfuscation (the
+# hidden path) plus privilege (what the path reaches) in the static pre-flight.
+GADGET_CASES: list[tuple[str, str, set[str]]] = [
+    ("random._os.system()",
+     'import random\nrandom._os.system("id")',
+     {"obfuscation", "privilege"}),
+    ("object.__subclasses__()",
+     "for k in object.__subclasses__():\n    pass",
+     {"obfuscation", "privilege"}),
+    ("().__class__.__base__.__subclasses__()",
+     "kls = ().__class__.__base__.__subclasses__()",
+     {"obfuscation", "privilege"}),
+    ("__builtins__ access",
+     'shell = __builtins__["__import__"]',
+     {"obfuscation", "privilege"}),
+    ("getattr(subprocess, 'Popen')",
+     'import subprocess\nrun = getattr(subprocess, "Popen")',
+     {"obfuscation", "privilege"}),
+    ("nested getattr reflection",
+     'f = getattr(getattr(obj, "first"), "second")',
+     {"obfuscation"}),
+    ("__import__('subprocess')",
+     'mod = __import__("subprocess")',
+     {"obfuscation", "privilege"}),
+    ("private module attribute load",
+     "import random\nos_mod = random._os",
+     {"obfuscation"}),
+]
+
+
+def check_gadgets() -> list[dict]:
+    """Static pre-flight must catch transitive import gadgets, and must not
+    flag ordinary code that merely uses `self._helper`."""
+    results: list[dict] = []
+    for title, src, want in GADGET_CASES:
+        intent = analyze_source(src)
+        got = set(intent.classes.keys())
+        ok = want.issubset(got)
+        results.append({"case": title, "expected": sorted(want),
+                        "got": sorted(got), "ok": ok})
+    benign = analyze_source(BENIGN)
+    clean = not ({"obfuscation", "privilege"} & set(benign.classes.keys()))
+    results.append({"case": "benign code has no gadget findings", "expected": [],
+                    "got": sorted(benign.classes.keys()), "ok": clean})
+    return results
 
 
 def check_benign() -> tuple[bool, str]:
@@ -114,6 +164,8 @@ def main() -> int:
     benign_ok, benign_detail = check_benign()
     report["benign"] = {"ok": benign_ok, "detail": benign_detail}
 
+    report["gadgets"] = check_gadgets()
+
     report["attacks"] = check_attacks()
 
     if not args.skip_oracles:
@@ -122,6 +174,7 @@ def main() -> int:
     contained = sum(1 for a in report["attacks"] if a["contained"])
     total = len(report["attacks"])
     oracle_ok = all(o["correct"] for o in report.get("oracles", [])) if "oracles" in report else True
+    gadget_ok = all(g["ok"] for g in report.get("gadgets", [])) if "gadgets" in report else True
 
     report["summary"] = {
         "runtime": runtime,
@@ -130,6 +183,7 @@ def main() -> int:
         "attacks_contained": contained,
         "all_contained": contained == total,
         "oracles_ok": oracle_ok,
+        "gadgets_ok": gadget_ok,
     }
 
     if args.json:
@@ -137,6 +191,12 @@ def main() -> int:
     else:
         print(f"runtime              : {runtime}")
         print(f"benign task succeeds : {benign_ok}  ({benign_detail})")
+        if "gadgets" in report:
+            bad_g = [g for g in report["gadgets"] if not g["ok"]]
+            print(f"gadget checks green  : {len(report['gadgets']) - len(bad_g)}/{len(report['gadgets'])}"
+                  f"  (transitive import gadgets -> obfuscation+privilege)")
+            for g in bad_g:
+                print(f"  [FAIL] {g['case']}: expected {g['expected']}, got {g['got']}")
         print(f"attacks contained    : {contained}/{total}")
         for a in report["attacks"]:
             mark = "PASS" if a["contained"] else "FAIL"
@@ -147,7 +207,7 @@ def main() -> int:
             for o in bad:
                 print(f"  [FAIL] {o['oracle']}: {o['detail']}")
 
-    good = benign_ok and contained == total and oracle_ok
+    good = benign_ok and contained == total and oracle_ok and gadget_ok
     print("\nRESULT:", "ALL GREEN" if good else "NEEDS WORK")
     return 0 if good else 1
 

@@ -82,6 +82,18 @@ class Ledger:
                 """
             )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id, seq)")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS regression_cases (
+                    case_id      TEXT PRIMARY KEY,
+                    run_id       TEXT NOT NULL,
+                    task_id      TEXT NOT NULL,
+                    payload      TEXT NOT NULL,
+                    ts           REAL NOT NULL,
+                    content_hash TEXT NOT NULL
+                )
+                """
+            )
 
     # --- writes ------------------------------------------------------------
 
@@ -149,3 +161,59 @@ class Ledger:
             "chain_valid": self.verify(run_id),
             "events": [e.to_dict() for e in evs],
         }
+
+    # --- regression cases ---------------------------------------------------
+
+    def save_regression_case(self, case: dict) -> tuple[str, bool]:
+        """Persist a promoted regression case; returns (case_id, created).
+
+        The case id is the SHA-256 of the canonical case content, so
+        promoting the same failed trace twice is a no-op that returns the
+        same id. The case payload must contain no volatile fields.
+        """
+        payload = _canonical(case)
+        case_id = "rc-" + hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+        created = False
+        with self._conn() as conn:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO regression_cases "
+                "(case_id, run_id, task_id, payload, ts, content_hash) VALUES (?,?,?,?,?,?)",
+                (case_id, case.get("run_id", ""), case.get("task_id", ""), payload,
+                 time.time(), hashlib.sha256(payload.encode("utf-8")).hexdigest()),
+            )
+            created = cur.rowcount > 0
+        if created:
+            # The promotion itself becomes part of the run's auditable history.
+            self.append(case.get("run_id", ""), "regression_promoted",
+                        {"case_id": case_id, "task_id": case.get("task_id", "")})
+        return case_id, created
+
+    def regression_cases(self) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT case_id, payload, ts FROM regression_cases ORDER BY ts"
+            ).fetchall()
+        out = []
+        for case_id, payload, ts in rows:
+            try:
+                case = json.loads(payload)
+            except Exception:
+                continue
+            case["case_id"] = case_id
+            case["stored_at"] = ts
+            out.append(case)
+        return out
+
+    def regression_case(self, case_id: str) -> dict | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT payload FROM regression_cases WHERE case_id = ?", (case_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            case = json.loads(row[0])
+        except Exception:
+            return None
+        case["case_id"] = case_id
+        return case
