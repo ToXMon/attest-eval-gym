@@ -6,7 +6,7 @@ ATTEST runs coding agents against real tasks, executes their generated Python in
 
 - Track: Vultr Agent Rush, Track 01 (Blast Radius Zero)
 - Repository: https://github.com/ToXMon/attest-eval-gym (public visibility needs confirmation)
-- Recorded deployment URL: https://bases-sources-operated-counter.trycloudflare.com
+- Live demo: https://demo.attestgym.com
 
 > **Deployment caveat:** The Cloudflare Quick Tunnel URL is ephemeral and has not been checked during this local documentation pass. The deployed VM was created using the **old compute key**. The user's wrong-account concern remains unresolved: account ownership needs user confirmation. Nothing here establishes that the VM or any artifact is on the replacement account. Do not reprovision or tear down infrastructure until ownership is resolved.
 

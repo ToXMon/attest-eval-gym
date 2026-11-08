@@ -12,6 +12,8 @@ Issues live in **GitHub Issues** on `ToXMon/attest-eval-gym` (via `gh` CLI). See
 
 **Single-context**: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`.
 
+**Deploying, updating the domain/tunnels, or troubleshooting the live site?** Read `docs/agents/deployment.md` first (approved host/tunnel/DNS identifiers, decision table, restart and rollback rules).
+
 ## Ground truth
 
 - `docs/adal/plan.md` — architecture; `docs/adal/spec.md` — frozen spec.
