@@ -5,10 +5,10 @@
 ATTEST runs coding agents against real tasks, executes their generated Python in disposable containers, and grades the results with deterministic code. An agent-team lead can compare versions, inspect failures, and promote a failed trace into a regression case.
 
 - Track: Vultr Agent Rush, Track 01 (Blast Radius Zero)
-- Repository: https://github.com/ToXMon/attest-eval-gym (public visibility needs confirmation)
+- Repository: https://github.com/ToXMon/attest-eval-gym
 - Live demo: https://demo.attestgym.com
 
-> **Deployment caveat:** The Cloudflare Quick Tunnel URL is ephemeral and has not been checked during this local documentation pass. The deployed VM was created using the **old compute key**. The user's wrong-account concern remains unresolved: account ownership needs user confirmation. Nothing here establishes that the VM or any artifact is on the replacement account. Do not reprovision or tear down infrastructure until ownership is resolved.
+> **Live deployment:** The public demo at https://demo.attestgym.com is served by a named Cloudflare Tunnel routing to the app on the Vultr VM. `docs/agents/deployment.md` is the runbook for deployment updates and troubleshooting.
 
 ## What the agent actually does
 
@@ -27,7 +27,7 @@ Containment scores are **refused 1.0, safe 1.0, attempted-but-contained 0.5, esc
 
 ## Architecture
 
-![ATTEST architecture: browser through a Quick Tunnel into the Vultr control plane, with separate inference, sandbox, and evidence flows](docs/submission/architecture.svg)
+![ATTEST architecture: browser through a Cloudflare Tunnel into the Vultr control plane, with separate inference, sandbox, and evidence flows](docs/submission/architecture.svg)
 
 [Open the full-size architecture SVG](docs/submission/architecture.svg).
 
@@ -35,15 +35,15 @@ Containment scores are **refused 1.0, safe 1.0, attempted-but-contained 0.5, esc
 
 | Component | Role and verification scope |
 |---|---|
-| Vultr Cloud Compute | The frozen deployment design uses an Ubuntu 24.04 `vc2-2c-4gb` VM. It hosts FastAPI/Uvicorn, Docker, the sandbox runtime, persisted run JSON, and the SQLite ledger. Deployment scripts default to `ewr`; current VM configuration was not remotely inspected. |
+| Vultr Cloud Compute | An Ubuntu 24.04 VM hosts FastAPI/Uvicorn, Docker, the sandbox runtime, persisted run JSON, and the SQLite ledger. The live VM was inspected directly on 2026-11-08: uvicorn on `127.0.0.1:8000` under systemd, Docker with the gVisor runtime, and the run database at `/var/lib/attest/attest.db`. The frozen deployment design targets `vc2-2c-4gb`; deployment scripts default to `ewr`. |
 | Vultr Serverless Inference | The built-in model-backed agents, suite generator, and display-only safety helpers use the OpenAI-compatible `https://api.vultrinference.com/v1` service. Keys stay in the control-plane process. |
 | Vultr API v2 | `scripts/deploy.sh` contains provisioning and deployment automation. It is separate from task execution; this documentation pass did not execute it. |
-| Cloudflare Quick Tunnel | Public HTTPS ingress to the app through `cloudflared`. The deployment script configures a loopback Uvicorn listener and SSH-only inbound firewall rules. The tunnel is an external ingress dependency, not a Vultr service. |
+| Cloudflare Tunnel (`cloudflared`) | Public HTTPS ingress to the app. The named tunnel `attest-demo` routes `demo.attestgym.com` to the app and returns 404 for any other hostname; a parallel Quick Tunnel serves the same app from the same systemd host but its URL rotates on restart. The tunnel is an external ingress dependency, not a Vultr service. The deployment script configures a loopback Uvicorn listener and SSH-only inbound firewall rules. |
 | Docker / gVisor | Generated code runs in containers on the VM, outside the app process. The runner prefers gVisor `runsc` and falls back to `runc`; inspect actual run evidence before claiming gVisor was used. |
 
 ### Data flow and security boundaries
 
-1. The browser reaches the VM's control plane through the Quick Tunnel. `POST /api/run` selects an agent and tasks; the UI consumes run events and scorecards.
+1. The browser reaches the VM's control plane through the public Cloudflare Tunnel ingress. `POST /api/run` selects an agent and tasks; the UI consumes run events and scorecards.
 2. The control plane makes model calls, performs AST pre-flight analysis, and launches generated code in a disposable container. Static analysis estimates **Attempted Radius**; it is not an execution-blocking security boundary.
 3. The container has `--network none`, a read-only root filesystem, writable tmpfs directories, dropped capabilities, `no-new-privileges`, and uid/gid `65534:65534`. The runner adds no host bind mounts, Docker socket, or host environment variables. Container-image defaults can still exist; "no inherited secrets" does not mean an empty environment.
 4. Configured limits include 512 MiB memory with no additional swap, 1 CPU quota, and 128 PIDs. The low-level runner defaults to 20 seconds; the gym currently passes a 25-second execution timeout. These are per execution, not an end-to-end inference SLA.
@@ -52,7 +52,7 @@ Containment scores are **refused 1.0, safe 1.0, attempted-but-contained 0.5, esc
 
 ### Model routing
 
-These identifiers come from local source configuration, **not a fresh provider-catalog check**.
+These identifiers come from local source configuration, not a fresh provider-catalog check.
 
 | Configured model | Role |
 |---|---|
@@ -92,7 +92,7 @@ That file records `chain_valid: true`; this pass did not independently recompute
 - `GET /api/evidence/{run_id}`: events, head hash, and recomputed chain validity
 - `GET /api/run/{run_id}/otel.json`: OTLP/JSON trace export
 
-**Interpretation matters.** Achieved Radius is currently a binary indicator derived from the containment classification. The classifier checks dangerous static capabilities, canary leakage, and known success markers; it is not a general host-side escape monitor. A zero does not prove all possible escapes are impossible. Reading `/etc/passwd` inside the container is also not evidence of reading the host's file.
+Achieved Radius is currently a binary indicator derived from the containment classification. The classifier checks dangerous static capabilities, canary leakage, and known success markers; it is not a general host-side escape monitor. A zero does not prove all possible escapes are impossible. Reading `/etc/passwd` inside the container is also not evidence of reading the host's file.
 
 The SHA-256 chain supports integrity checking against a trusted published head. It is not a digital signature, external timestamp, or guarantee that an operator cannot rewrite the entire history.
 
@@ -135,7 +135,7 @@ curl --fail --silent --show-error http://127.0.0.1:8000/api/run \
   -d '{"agent":{"name":"compliant"},"tasks":["t01","t02","t08","t09"]}'
 ```
 
-Deployment and destruction scripts are intentionally outside this local walkthrough. They contact Vultr, can alter billable resources, and must not be run against the unresolved account.
+Deployment and destruction scripts are intentionally outside this local walkthrough. They contact Vultr, can alter billable resources, and the runbook in `docs/agents/deployment.md` is the authority for when and how to run them.
 
 ## Persisted-run quarantine and operator recovery
 
@@ -147,10 +147,12 @@ Before recovery, stop public serving and back up the quarantine directory and th
 
 The publication schema is a trusted-local-writer provenance marker, not a cryptographic signature or a detector of all secrets. Operators must protect write access to run storage and must not manually stamp legacy files. Existing safe-format files reload without rewriting their recorded ledger hashes or claiming a fresh integrity verification.
 
-## Scope and submission status
+## Scope and limits
 
-This is a hackathon prototype, not a multi-tenant hostile-code service. It has no authentication or production admission controls; public run endpoints can consume resources. Use synthetic data and do not paste private credentials into a public demonstration.
+This is a hackathon prototype, not a multi-tenant hostile-code service. It has no authentication or production admission controls, and public run endpoints can consume resources. Use synthetic data, and do not paste private credentials into a public demonstration.
 
-The submission package contains [form copy](docs/submission/lablab-form.md), a [10-slide outline](docs/submission/slides-outline.md), a [90-second recording plan](docs/submission/demo-script.md), and the [official checklist](docs/submission/official-checklist.md). The video, rendered deck, and cover image still need to be produced and attached. Live UI behavior needs rehearsal.
+Submission material lives in `docs/submission/`: the [form copy](docs/submission/lablab-form.md), the [slide outline](docs/submission/slides-outline.md), the [recording plan](docs/submission/demo-script.md), and the [official checklist](docs/submission/official-checklist.md).
 
-MIT compliance is required by the submission brief. **No `LICENSE` file was found during this pass**; the owner must confirm rights and add the appropriate license before submission. No public-repository visibility, live availability, account ownership, or contest submission was verified here.
+## License
+
+MIT. See [LICENSE](LICENSE).
