@@ -3,385 +3,444 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>ATTEST — Agent Eval &amp; Containment Gym</title>
+<title>ATTEST: agent eval and containment gym</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E" />
+<script>
+(()=>{let saved;try{saved=localStorage.getItem('attest-theme')}catch{}const theme=saved==='light'||saved==='dark'?saved:(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.dataset.theme=theme;})();
+</script>
 <style>
-/* ATTEST UI — tokens at :root, no literals past this block. OKLCH dark, one accent (mint). */
+/* ATTEST assay workbench: neutral surfaces, ink text, one deep blue accent.
+   System fonts only. Status colour is reserved for verdict words, the ladder and chain state. */
 :root{
+  color-scheme:light;
+  --bg:#ffffff; --bg-2:#f6f7f8; --line:#e3e5e8; --line-strong:#6b737e;
+  --ink:#16181d; --ink-2:#3d434c; --muted:#5c636e;
+  --accent:#1f4e8c; --accent-ink:#ffffff; --accent-weak:#eaf0f8;
+  --ok:#1e6b3a; --warn:#8a5a00; --bad:#b3261e; --shadow:rgba(22,24,29,.22);
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --hh:52px; --tb:44px;
+}
+:root[data-theme="dark"]{
   color-scheme:dark;
-  --paper:oklch(13% 0.02 264); --paper-2:oklch(17% 0.022 264); --paper-3:oklch(22% 0.024 264);
-  --ink:oklch(95% 0.01 250); --ink-2:oklch(86% 0.03 245); --muted:oklch(68% 0.03 256); --dim:oklch(50% 0.03 258);
-  --rule:oklch(28% 0.03 264); --rule-2:oklch(36% 0.03 262);
-  --accent:oklch(78% 0.15 165); --accent-ink:oklch(16% 0.05 264);
-  --amber:oklch(78% 0.13 75); --red:oklch(70% 0.16 25); --blue:oklch(72% 0.12 240); --violet:oklch(72% 0.13 300);
-  --ease-out:cubic-bezier(0.16,1,0.3,1); --dur:220ms; --dur-long:420ms;
-  --container:1280px; --gutter:clamp(16px,4vw,48px); --gap:24px;
-  --text-display:clamp(2rem,4vw + 0.5rem,3.25rem); --text-section:clamp(1.5rem,2vw + 0.75rem,2.25rem);
-  --text-title:clamp(1.125rem,0.75vw + 0.875rem,1.375rem); --text-lead:clamp(1.0625rem,0.35vw + 1rem,1.25rem);
-  --text-md:1rem; --text-sm:0.875rem; --text-xs:0.8125rem;
-  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
-  --radius:12px; --radius-sm:8px; --radius-pill:999px;
+  --bg:#111317; --bg-2:#171a1f; --line:#262a31; --line-strong:#6b7480;
+  --ink:#eceef1; --ink-2:#c4c9d0; --muted:#9aa2ad;
+  --accent:#8fb3e8; --accent-ink:#0e1a2b; --accent-weak:#1a2433;
+  --ok:#7cc495; --warn:#e0b45c; --bad:#f08a80; --shadow:rgba(0,0,0,.5);
 }
 *,*::before,*::after{box-sizing:border-box}
-html,body{overflow-x:clip;margin:0}
-html{scroll-padding-top:80px}
-body{background:var(--paper);color:var(--ink);font:var(--text-md)/1.55 -apple-system,BlinkMacSystemFont,"Inter",Segoe UI,sans-serif;-webkit-font-smoothing:antialiased;caret-color:var(--accent)}
-::selection{background:oklch(78% 0.15 165 / 0.25)}
-:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
-a{color:var(--accent);text-decoration-thickness:1px;text-underline-offset:0.16em}
-h1,h2,h3{margin:0;font-weight:600;letter-spacing:-0.02em;line-height:1.1;overflow-wrap:break-word;min-width:0;text-wrap:balance}
-h1{font-size:var(--text-display)} h2{font-size:var(--text-title);font-weight:600} h3{font-size:var(--text-title);font-weight:500}
-.num,.figure,td.num,.metric .v,.chip .v{font-variant-numeric:tabular-nums}
-.mono{font-family:var(--mono)}
-.wrap{width:100%;max-width:var(--container);margin-inline:auto;padding-inline:var(--gutter)}
+html,body{margin:0}
+html{scroll-padding-top:calc(var(--hh) + var(--tb) + 8px)}
+body{background:var(--bg);color:var(--ink);font:15px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
+::selection{background:var(--accent-weak)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+a{color:var(--accent);text-underline-offset:.16em}
+h1,h2,h3,p,dl,dd,figure{margin:0}
+h1{font-size:22px;line-height:1.3;font-weight:600;overflow-wrap:break-word}
+h2,h3{font-size:18px;line-height:1.3;font-weight:600}
+.wrap{width:100%;max-width:1280px;margin-inline:auto;padding-inline:32px}
+.mono{font-family:var(--mono);overflow-wrap:anywhere}
+.muted{color:var(--muted)}
+.small{font-size:12.5px;line-height:1.5}
+.num{font-variant-numeric:tabular-nums}
+.skip{position:absolute;left:16px;top:-100px;z-index:100;background:var(--bg);color:var(--ink);border:1px solid var(--line-strong);border-radius:6px;padding:10px 14px}
+.skip:focus{top:8px}
 
 /* header */
-header{position:sticky;top:0;z-index:30;background:oklch(13% 0.02 264 / 0.85);backdrop-filter:blur(12px);border-bottom:1px solid var(--rule)}
-.hbar{display:flex;align-items:center;gap:16px;padding-block:14px}
-.brand{display:flex;align-items:baseline;gap:10px}
-.brand h1{font-size:1.25rem;font-weight:700;letter-spacing:-0.03em}
-.brand .tag{color:var(--muted);font-size:var(--text-sm)}
-.brand b{color:var(--accent)}
-.spacer{flex:1}
-.pill{font:var(--text-xs) var(--mono);padding:5px 10px;border-radius:var(--radius-pill);border:1px solid var(--rule);color:var(--muted);background:var(--paper-2);white-space:nowrap}
-.pill.ok{color:var(--accent);border-color:oklch(78% 0.15 165 / 0.35)}
-.pill.bad{color:var(--red);border-color:oklch(70% 0.16 25 / 0.35)}
+header{position:sticky;top:0;z-index:30;background:var(--bg);border-bottom:1px solid var(--line)}
+.hbar{display:flex;align-items:center;gap:24px;min-height:var(--hh)}
+.brand{font-size:18px;font-weight:700}
+.status{display:flex;gap:16px;margin-left:auto;font-size:12.5px;color:var(--muted)}
+.status .bad{color:var(--bad);font-weight:600}
+.theme-switch{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 10px;background:var(--bg);color:var(--ink);border:1px solid var(--line-strong);border-radius:6px;font:12.5px var(--sans);cursor:pointer;white-space:nowrap}
+.theme-switch .sw-st{font-weight:700}
 
-/* hero */
-.hero{position:relative;padding:72px 0 48px;overflow:hidden}
-.hero::before{content:"";position:absolute;top:-40%;left:50%;transform:translateX(-50%);width:900px;height:600px;
-  background:radial-gradient(closest-side,oklch(78% 0.15 165 / 0.12),transparent);pointer-events:none;z-index:0}
-.hero>*{position:relative;z-index:1}
-.hero h1{max-width:18ch;margin-bottom:16px}
-.hero h1 .ac{color:var(--accent)}
-.hero .lead{font-size:var(--text-lead);color:var(--ink-2);max-width:54ch;margin-bottom:28px}
-.evalbar{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
-.evalbar .field{flex:1;min-width:260px}
-.evalbar label{display:block;font-size:var(--text-xs);color:var(--muted);margin-bottom:6px}
-.evalbar input{width:100%;background:var(--paper-2);border:1px solid var(--rule);color:var(--ink);border-radius:var(--radius-sm);padding:12px 14px;font:var(--text-sm) var(--mono);outline:none}
-.evalbar input:focus{border-color:var(--accent);box-shadow:0 0 0 3px oklch(78% 0.15 165 / 0.12)}
-.btn{background:var(--accent);color:var(--accent-ink);border:0;border-radius:var(--radius-sm);padding:12px 20px;font:600 var(--text-md)/1 inherit;cursor:pointer;white-space:nowrap;transition:transform var(--dur) var(--ease-out),filter var(--dur) var(--ease-out)}
-.btn:hover{filter:brightness(1.08)}
-.btn:active{transform:scale(0.97)}
-.btn:disabled{opacity:0.5;cursor:not-allowed}
-.btn.ghost{background:transparent;color:var(--ink-2);border:1px solid var(--rule)}
-.btn.ghost:hover{border-color:var(--muted);filter:none}
-.btn .spin{display:inline-block;width:14px;height:14px;border:2px solid oklch(16% 0.05 264 / 0.4);border-top-color:var(--accent-ink);border-radius:50%;animation:spin 0.7s linear infinite;vertical-align:-2px;margin-right:7px}
-@keyframes spin{to{transform:rotate(360deg)}}
-.statchips{display:flex;gap:0;flex-wrap:wrap;margin-top:24px;border:1px solid var(--rule);border-radius:var(--radius-sm);overflow:hidden;background:var(--paper-2)}
-.chip{padding:10px 16px;border-right:1px solid var(--rule);display:flex;align-items:baseline;gap:8px}
-.chip:last-child{border-right:0}
-.chip .k{font-size:var(--text-xs);color:var(--muted)}
-.chip .v{font:600 var(--text-sm) var(--mono);color:var(--ink)}
+/* intro */
+.intro{padding:16px 0 12px}
+.intro h1{margin-bottom:10px}
+.intro-grid{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);column-gap:48px;align-items:start}
+.intro-main>*+*{margin-top:10px}
+.method{color:var(--ink-2)}
+.runbar{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:end}
+.runbar label,.byo label{display:block;font-size:12.5px;color:var(--ink-2);margin-bottom:2px}
+input,select{width:100%;min-height:40px;background:var(--bg);color:var(--ink);border:1px solid var(--line-strong);border-radius:6px;padding:6px 10px;font:15px var(--sans)}
+input.mono{font-family:var(--mono);font-size:12.5px}
+input::placeholder{color:var(--muted);opacity:1}
+select{width:auto;max-width:100%}
+.btn{min-height:40px;padding:0 16px;background:var(--bg);color:var(--ink);border:1px solid var(--line-strong);border-radius:6px;font:15px var(--sans);cursor:pointer;white-space:normal;text-align:center}
+.btn:hover{background:var(--bg-2)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+.btn.primary:hover{filter:brightness(.9);background:var(--accent)}
+.btn:active{transform:scale(.98)}
+.btn:disabled{background:var(--bg-2);color:var(--muted);border-color:var(--line-strong);cursor:not-allowed;filter:none;transform:none}
+#model-scope,#key-disclosure{color:var(--ink-2);overflow-wrap:anywhere}
+.aux{display:flex;flex-wrap:wrap;align-items:center;gap:8px 24px}
+details{border:1px solid var(--line-strong);border-radius:6px;background:var(--bg)}
+details[open]{flex:1 0 100%}
+summary{cursor:pointer;min-height:34px;padding:4px 10px;display:flex;align-items:center;font-size:12.5px;color:var(--ink)}
+.byo{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:8px 12px 12px;border-top:1px solid var(--line)}
+.byo #key-disclosure{grid-column:1/-1}
+.adapter{color:var(--muted)}
+.facts{border-top:1px solid var(--line)}
+.facts>div{display:grid;grid-template-columns:116px minmax(0,1fr);gap:12px;padding:5px 0;border-bottom:1px solid var(--line);align-items:baseline}
+.facts dt{font-size:12.5px;color:var(--muted)}
+.facts dd{overflow-wrap:anywhere}
+.facts .tids{white-space:nowrap}
+.bad-t{color:var(--bad);font-weight:600}
 
-/* sections */
-section.block{padding:48px 0;border-top:1px solid var(--rule)}
-section.block.hidden{display:none}
-.sec-head{display:flex;align-items:baseline;gap:12px;margin-bottom:24px;flex-wrap:wrap}
-.sec-head h2{font-size:var(--text-section)}
-.sec-head .sub{font-size:var(--text-sm);color:var(--muted)}
-.sec-head .spacer{flex:1}
+/* view switcher */
+nav.tabs{position:sticky;top:var(--hh);z-index:20;background:var(--bg);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.tabbar{display:flex;gap:28px;overflow-x:auto;scrollbar-width:none}
+.tabbar::-webkit-scrollbar{display:none}
+.t{min-height:var(--tb);padding:0 2px;background:none;border:0;border-bottom:2px solid transparent;margin-bottom:-1px;color:var(--muted);font:15px var(--sans);white-space:nowrap;cursor:pointer}
+.t:hover{color:var(--ink)}
+.t[aria-current="true"]{color:var(--ink);font-weight:600;border-bottom-color:var(--accent)}
+.t:focus-visible,.hd:focus-visible,tr.row:focus-visible{outline-offset:-2px}
 
-/* nav tabs */
-nav.tabs{display:flex;gap:4px;border-bottom:1px solid var(--rule);overflow-x:auto;scrollbar-width:none}
-nav.tabs::-webkit-scrollbar{display:none}
-nav.tabs .t{padding:12px 16px;font-size:var(--text-sm);color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;transition:color var(--dur),border-color var(--dur)}
-nav.tabs .t:hover{color:var(--ink-2)}
-nav.tabs .t.on{color:var(--ink);border-bottom-color:var(--accent)}
+/* views */
+.view{padding:16px 0 40px}
+.view.hidden{display:none}
+.vhead{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;margin-bottom:8px}
+.vhead .acts{margin-left:auto;display:flex;gap:16px;align-items:center}
+.vhead .acts .linkbtn,.vhead .acts a{min-height:32px;display:inline-flex;align-items:center}
+.note{color:var(--ink-2);max-width:92ch;overflow-wrap:anywhere}
+#board-note{margin-top:12px}
+.view h3{margin:28px 0 8px}
+.defcol h3,.tasks-head h3{margin:0}
+.tasks-head{margin-top:28px}
+.linkbtn{background:none;border:0;padding:0;color:var(--accent);font:15px var(--sans);text-decoration:underline;text-underline-offset:.16em;cursor:pointer}
+.empty{padding:32px 0;color:var(--muted)}
 
-/* leaderboard */
-table{width:100%;border-collapse:collapse;font-size:var(--text-sm)}
-th,td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--rule)}
-th{font-size:var(--text-xs);color:var(--muted);font-weight:500}
-th.num,td.num{text-align:right;font-family:var(--mono)}
-tr.row{cursor:pointer;transition:background var(--dur) var(--ease-out)}
-tr.row:hover{background:var(--paper-2)}
-tr.row.sel{background:oklch(78% 0.15 165 / 0.06)}
-tr.row.enter{animation:rowin var(--dur-long) var(--ease-out) both}
-@keyframes rowin{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
-.rank{font:600 var(--text-md) var(--mono);color:var(--dim)}
-.m0{color:var(--accent)} .m1{color:var(--amber)} .m2{color:var(--red)}
-.chain{font:var(--text-xs) var(--mono)}
-.chain.ok{color:var(--accent)} .chain.bad{color:var(--red)}
-.empty{color:var(--dim);padding:48px 0;text-align:center;font-size:var(--text-sm)}
+/* tables */
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:baseline}
+th{font-size:12.5px;font-weight:600;color:var(--muted);background:var(--bg-2);line-height:1.35}
+th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
+#board-wrap,.table-scroll{overflow-x:auto}
+#board-table{min-width:880px}
+#eval-table{min-width:640px}
+tr.row{cursor:pointer}
+tr.row:hover{background:var(--bg-2)}
+tr.row.sel{background:var(--accent-weak)}
+tr.row.sel .agent{color:var(--accent)}
+.agent{font-weight:600;overflow-wrap:anywhere}
+#board-table td:nth-child(2){max-width:300px}
+.rank{color:var(--muted)}
+.chain-ok{color:var(--muted)} .chain-bad{color:var(--bad);font-weight:600}
 
-/* scorecard layers */
-.layers{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:var(--gap);margin-bottom:32px}
-.layer{background:var(--paper-2);border:1px solid var(--rule);border-radius:var(--radius);padding:20px;border-top:3px solid var(--rule)}
-.layer.l1{border-top-color:var(--blue)} .layer.l2{border-top-color:var(--violet)} .layer.l3{border-top-color:var(--accent)} .layer.l4{border-top-color:var(--amber)}
-.layer h3{font-size:var(--text-title);margin-bottom:4px}
-.layer .desc{font-size:var(--text-xs);color:var(--muted);line-height:1.5;margin-bottom:14px}
-.layer .big{font:600 2rem var(--mono);line-height:1.1}
-.layer .meta{font:var(--text-xs) var(--mono);color:var(--muted);margin-top:8px;line-height:1.5}
-.layer .meta b{color:var(--ink-2);font-weight:500}
-.trajq{display:grid;gap:6px;margin-bottom:10px}
-.trajq .q{display:flex;align-items:center;gap:8px;font:var(--text-xs) var(--mono);color:var(--muted)}
-.trajq .q .ic{width:16px;height:16px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex:none}
-.trajq .q .ic.y{background:oklch(78% 0.15 165 / 0.18);color:var(--accent)}
-.trajq .q .ic.n{background:oklch(70% 0.16 25 / 0.18);color:var(--red)}
-.ladder{display:flex;gap:4px;margin-top:10px;flex-wrap:wrap}
-.ladder span{font:var(--text-xs) var(--mono);padding:4px 8px;border-radius:var(--radius-sm);border:1px solid var(--rule);color:var(--dim)}
-.ladder span.on.refused,.ladder span.on.safe{color:var(--accent);border-color:oklch(78% 0.15 165 / 0.4);background:oklch(78% 0.15 165 / 0.08)}
-.ladder span.on.contained{color:var(--amber);border-color:oklch(78% 0.13 75 / 0.4);background:oklch(78% 0.13 75 / 0.08)}
-.ladder span.on.escaped{color:var(--red);border-color:oklch(70% 0.16 25 / 0.4);background:oklch(70% 0.16 25 / 0.08)}
-.ladder span.on{animation:rungin 180ms var(--ease-out)}
-@keyframes rungin{from{transform:scale(0.9);opacity:0.4}to{transform:scale(1);opacity:1}}
+/* run view */
+.facts-line{display:flex;flex-wrap:wrap;gap:2px 0;color:var(--ink-2);margin-bottom:8px}
+.facts-line .fact+.fact::before{content:"\00b7";margin:0 8px;color:var(--muted)}
+.facts-line .k{color:var(--muted);font-size:12.5px;margin-right:4px}
+.scoreline{display:flex;flex-wrap:wrap;gap:12px 0;padding:14px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin:12px 0 4px}
+.scoreline>div{padding-right:32px;margin-right:32px;border-right:1px solid var(--line)}
+.scoreline>div:last-child{border-right:0;margin-right:0;padding-right:0}
+.scoreline .k{font-size:12.5px;color:var(--muted)}
+.scoreline .v{font-size:18px;font-weight:600;line-height:1.3;font-variant-numeric:tabular-nums}
+.scoreline .main .v{font-size:28px;line-height:1.2}
+.layer-table td:first-child{font-weight:600}
+.layer-table td:nth-child(2){color:var(--ink-2)}
+@media(min-width:901px){.layer-table td:first-child{width:24%}.layer-table td:nth-child(2){width:36%}}
+.layer-table .res{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums}
+.trajq{display:grid;gap:2px}
+.trajq .q.fail{color:var(--bad);font-weight:600}
+.ladder{display:flex;flex-wrap:wrap;gap:2px 16px;margin-top:4px;color:var(--muted)}
+.ladder .on.refused,.ladder .on.safe{color:var(--ok);font-weight:600}
+.ladder .on.contained{color:var(--warn);font-weight:600}
+.ladder .on.escaped{color:var(--bad);font-weight:600}
+#sc-defense{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 32px}
+.defcol{border-top:1px solid var(--line);padding:10px 0 4px}
+.defcol .desc{color:var(--ink-2)}
+.radv{font-size:18px;font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums}
+.radv.esc{color:var(--bad)}
+.cls{margin-top:4px;color:var(--muted);overflow-wrap:anywhere}
+#sc-nosecret{margin-top:12px;color:var(--ink-2);max-width:92ch}
 
-/* two-layer defense */
-.defense{display:grid;grid-template-columns:1fr 1fr;gap:var(--gap);margin-bottom:16px}
-.defcard{background:var(--paper-2);border:1px solid var(--rule);border-radius:var(--radius);padding:20px}
-.defcard.attempted{border-left:3px solid var(--amber)}
-.defcard.achieved{border-left:3px solid var(--accent)}
-.defcard h3{font-size:var(--text-title);margin-bottom:4px}
-.defcard .desc{font-size:var(--text-xs);color:var(--muted);margin-bottom:14px;line-height:1.5}
-.defcard .radv{font:600 2rem var(--mono);line-height:1.1}
-.defcard .radv.esc{color:var(--red)}
-.clslist{margin-top:10px;font:var(--text-xs) var(--mono);color:var(--muted);line-height:1.8}
-.clslist .c{display:inline-block;padding:2px 7px;border-radius:5px;background:var(--paper-3);border:1px solid var(--rule);color:var(--ink-2);margin-right:4px}
-.nosecret{background:var(--paper-2);border:1px dashed var(--rule);border-radius:var(--radius);padding:16px 18px;font-size:var(--text-sm);color:var(--muted);line-height:1.6}
-.nosecret b{color:var(--ink-2)}
-.nosecret .mono{color:var(--ink-2)}
-
-/* per-task cards */
-.task{border:1px solid var(--rule);border-left-width:3px;border-radius:var(--radius-sm);margin-bottom:10px;background:var(--paper-2);overflow:hidden;transition:border-color var(--dur)}
-.task.pass{border-left-color:var(--accent)} .task.fail{border-left-color:var(--red)} .task.partial{border-left-color:var(--amber)} .task.pending{border-left-color:var(--rule)}
-.task .hd{display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;flex-wrap:wrap}
-.task .sl{font:var(--text-xs) var(--mono);padding:4px 8px;border-radius:5px;font-weight:600;letter-spacing:0.3px}
-.sl.TASK{background:oklch(72% 0.12 240 / 0.15);color:var(--blue)}
-.sl.ADVERSARIAL{background:oklch(78% 0.13 75 / 0.15);color:var(--amber)}
-.sl.CONTAINMENT{background:oklch(72% 0.13 300 / 0.15);color:var(--violet)}
-.task .var{font:var(--text-xs) var(--mono);padding:3px 7px;border-radius:5px;border:1px solid var(--rule);color:var(--dim)}
-.task .ti{font-weight:600;font-size:var(--text-sm);flex:1;min-width:0}
-.task .vd{font:var(--text-xs) var(--mono);padding:4px 9px;border-radius:5px;font-weight:600}
-.vd.pass{background:oklch(78% 0.15 165 / 0.15);color:var(--accent)}
-.vd.fail{background:oklch(70% 0.16 25 / 0.15);color:var(--red)}
-.vd.partial{background:oklch(78% 0.13 75 / 0.15);color:var(--amber)}
-.task .bd{display:none;padding:0 14px 14px;border-top:1px solid var(--rule)}
+/* tasks */
+.task{border-bottom:1px solid var(--line)}
+.task .hd{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;padding:10px 4px;cursor:pointer;min-height:44px}
+.task .hd:hover{background:var(--bg-2)}
+.sl{flex:0 0 108px;font-size:12.5px;color:var(--muted)}
+.tid{flex:0 0 36px;font-family:var(--mono);font-size:12.5px}
+.task .ti{flex:1 1 200px;min-width:0;font-weight:600;overflow-wrap:anywhere}
+.task .lat,.task .tok{flex:none;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.vd{flex:0 0 92px;text-align:right;font-size:12.5px;font-weight:700}
+.vd.pass{color:var(--ok)} .vd.fail{color:var(--bad)} .vd.partial{color:var(--warn)}
+.task .bd{display:none;padding:4px 4px 16px}
 .task.open .bd{display:block}
-.metric{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin:10px 0}
-.metric .cell{background:var(--paper-3);border:1px solid var(--rule);border-radius:var(--radius-sm);padding:9px 11px}
-.metric .k{font-size:var(--text-xs);color:var(--dim)}
-.metric .v{font:600 var(--text-sm) var(--mono);margin-top:2px}
-pre{background:oklch(10% 0.02 264);border:1px solid var(--rule);border-radius:var(--radius-sm);padding:12px;overflow:auto;font:var(--text-xs)/1.55 var(--mono);margin:8px 0;color:var(--ink-2);max-height:280px;white-space:pre-wrap;word-break:break-word}
-.kv{font:var(--text-xs)/1.7 var(--mono);color:var(--muted)}
-.kv b{color:var(--ink-2);font-weight:500}
+.dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 24px;margin:8px 0 12px}
+.dl dt{font-size:12.5px;color:var(--muted)}
+.dl dd{overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.cap{font-size:12.5px;color:var(--muted);margin:12px 0 2px}
+pre{margin:2px 0;padding:10px 12px;background:var(--bg-2);border:1px solid var(--line);border-radius:6px;overflow:auto;max-height:280px;font:12.5px/1.55 var(--mono);color:var(--ink-2);white-space:pre-wrap;overflow-wrap:anywhere}
+.lines{color:var(--ink-2);overflow-wrap:anywhere}
+.lines>div+div{margin-top:2px}
+.task-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px;margin-top:12px}
+.promote{min-height:36px;padding:0 12px;background:var(--bg);color:var(--ink);border:1px solid var(--line-strong);border-radius:6px;font:15px var(--sans);cursor:pointer;text-align:left}
+.promote:hover{background:var(--bg-2)}
+.promote:disabled{color:var(--muted);background:var(--bg-2);cursor:default}
 
-/* evals */
-.subtabs{display:flex;gap:8px;margin-bottom:16px}
-.subtab{padding:8px 14px;border-radius:var(--radius-sm);font-size:var(--text-sm);color:var(--muted);cursor:pointer;border:1px solid var(--rule);background:var(--paper-2);transition:color var(--dur),border-color var(--dur)}
-.subtab.on{color:var(--ink);border-color:var(--accent);background:oklch(78% 0.15 165 / 0.06)}
-.badge{font:var(--text-xs) var(--mono);padding:4px 8px;border-radius:5px;font-weight:700;letter-spacing:0.2px}
-.badge.fixed{color:var(--accent);background:oklch(78% 0.15 165 / 0.12);border:1px solid oklch(78% 0.15 165 / 0.35)}
-.badge.regressed{color:var(--red);background:oklch(70% 0.16 25 / 0.12);border:1px solid oklch(70% 0.16 25 / 0.35)}
-.badge.unchanged{color:var(--dim);background:var(--paper-3);border:1px solid var(--rule)}
-.badge.new{color:var(--blue);background:oklch(72% 0.12 240 / 0.12);border:1px solid oklch(72% 0.12 240 / 0.35)}
-.promote{font:var(--text-xs) var(--mono);padding:5px 9px;border-radius:5px;border:1px solid oklch(72% 0.13 300 / 0.45);color:var(--violet);background:transparent;cursor:pointer;transition:background var(--dur)}
-.promote:hover{background:oklch(72% 0.13 300 / 0.1)}
+/* compare */
+#eval-picker{display:flex;flex-wrap:wrap;gap:12px 16px;margin:12px 0}
+#eval-picker label{display:grid;gap:2px;min-width:0;flex:1 1 260px;font-size:12.5px;color:var(--ink-2)}
+#eval-picker select{width:100%;font-size:15px}
+.subtabs{display:flex;gap:24px;margin:4px 0 8px;border-bottom:1px solid var(--line)}
+.subtab{min-height:40px;padding:0 2px;background:none;border:0;border-bottom:2px solid transparent;margin-bottom:-1px;color:var(--muted);font:15px var(--sans);cursor:pointer}
+.subtab[aria-current="true"]{color:var(--ink);font-weight:600;border-bottom-color:var(--accent)}
+.badge{font-weight:700;font-size:12.5px}
+.badge.fixed{color:var(--ok)} .badge.regressed{color:var(--bad)} .badge.new{color:var(--ink)} .badge.unchanged{color:var(--muted);font-weight:400}
 
 /* evidence */
-.otel-link{font:var(--text-sm) var(--mono);color:var(--accent)}
+.otel-link{display:inline-block;margin:12px 0 8px}
+#ev-sum{margin-top:8px}
 
-/* footer */
-footer{border-top:1px solid var(--rule);padding:32px 0;color:var(--muted);font-size:var(--text-sm)}
-footer .wrap{display:flex;gap:16px;flex-wrap:wrap;align-items:baseline}
-footer .spacer{flex:1}
+footer{border-top:1px solid var(--line);padding:20px 0;color:var(--muted);font-size:12.5px}
+footer .wrap{display:flex;flex-wrap:wrap;gap:8px 24px;align-items:baseline}
+footer a{min-height:24px}
+.toast{position:fixed;right:16px;bottom:16px;z-index:60;max-width:min(420px,calc(100vw - 32px));padding:10px 14px;background:var(--bg);color:var(--ink);border:1px solid var(--line-strong);border-radius:6px;box-shadow:0 4px 16px var(--shadow);visibility:hidden;pointer-events:none;overflow-wrap:anywhere}
+.toast.on{visibility:visible}
+noscript p{padding:16px 32px;margin:0;border-bottom:1px solid var(--line)}
 
-/* toast */
-.toast{position:fixed;right:20px;bottom:20px;background:var(--paper-3);border:1px solid var(--rule);border-radius:var(--radius-sm);padding:12px 16px;font-size:var(--text-sm);opacity:0;transform:translateY(8px);transition:opacity var(--dur),transform var(--dur);pointer-events:none;z-index:60;max-width:400px}
-.toast.on{opacity:1;transform:translateY(0)}
-details{margin-top:16px;border:1px solid var(--rule);border-radius:var(--radius-sm);background:var(--paper-2);overflow:hidden}
-details summary{cursor:pointer;color:var(--muted);font-size:var(--text-sm);padding:10px 14px;list-style:none;user-select:none}
-details summary::-webkit-details-marker{display:none}
-details summary::before{content:"▸ ";color:var(--dim);transition:transform var(--dur)}
-details[open] summary::before{content:"▾ "}
-details[open] summary{border-bottom:1px solid var(--rule)}
-.byo{margin-top:10px;display:grid;gap:8px}
-.byo label{font-size:var(--text-xs);color:var(--muted)}
-.byo input{width:100%;background:var(--paper-3);border:1px solid var(--rule);color:var(--ink);border-radius:var(--radius-sm);padding:9px 11px;font:var(--text-xs) var(--mono);outline:none}
-
-.btn{font-family:inherit;font-size:var(--text-md);font-weight:600;line-height:1.2}
-#board-wrap,#s-evals>.wrap{overflow-x:auto}
-#board-table{min-width:920px}
-#eval-table{min-width:650px}
-#eval-picker{display:flex;gap:16px;flex-wrap:wrap}
-#eval-picker label{display:grid;gap:6px;min-width:0;flex:1}
-select{max-width:100%;background:var(--paper-2);color:var(--ink);border:1px solid var(--rule);border-radius:var(--radius-sm);padding:10px;font:inherit}
-.ledger-hash,.metric .v,#sc-sub{overflow-wrap:anywhere}
-.task-actions{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:14px}
-.task-actions .promote{white-space:normal;text-align:left;min-height:44px}
-.byo{padding:14px}
-#model-scope,#key-disclosure{overflow-wrap:anywhere}
-.evalbar .btn{white-space:normal}
-.toast{max-width:min(400px,calc(100vw - 32px));overflow-wrap:anywhere}
-nav.tabs .t,.subtab{background:transparent;border:0;font-family:inherit}
-nav.tabs .t{border-bottom:2px solid transparent}
-.subtab{border:1px solid var(--rule)}
-@media(max-width:1000px){.brand .tag{display:none}.layers{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:760px){.defense{grid-template-columns:1fr}.evalbar{align-items:stretch;flex-direction:column}.evalbar .field{width:100%;min-width:0}.evalbar .btn{width:100%}.hero{padding:40px 0 32px}.hbar{gap:6px}.pill{font-size:10px;padding:5px 6px}.brand h1{font-size:1.1rem}.subtabs{flex-wrap:wrap}.layers{grid-template-columns:1fr}.chip{padding:10px 12px}.sec-head{margin-bottom:16px}.task .hd{gap:8px}.task .ti{flex-basis:60%}section.block{padding:32px 0}}
-@media(prefers-reduced-motion:reduce){*{animation-duration:0.01ms!important;transition-duration:0.01ms!important}}
+@media(max-width:900px){
+  .wrap{padding-inline:24px}
+  .intro-grid{grid-template-columns:minmax(0,1fr)}
+  .facts{margin-top:16px}
+  .facts>div{grid-template-columns:116px minmax(0,1fr)}
+  .byo{grid-template-columns:minmax(0,1fr)}
+  #sc-defense{grid-template-columns:minmax(0,1fr)}
+}
+@media(max-width:700px){
+  .wrap{padding-inline:16px}
+  header{position:static}
+  nav.tabs{top:0}
+  html{scroll-padding-top:calc(var(--tb) + 8px)}
+  .hbar{flex-wrap:wrap;gap:0 16px;padding-block:4px}
+  .brand{order:0}
+  .theme-switch{order:1;margin-left:auto;min-height:44px;padding:0 12px}
+  .status{order:2;flex:1 0 100%;margin-left:0;flex-wrap:wrap;gap:0 16px;padding-bottom:6px}
+  .runbar{grid-template-columns:minmax(0,1fr)}
+  .btn,input,select,summary{min-height:44px}
+  .promote,.linkbtn,.vhead .acts .linkbtn,.vhead .acts a{min-height:44px}
+  .subtab{min-height:44px}
+  .tabbar{gap:20px}
+  .facts>div{grid-template-columns:96px minmax(0,1fr);gap:8px;padding:4px 0}
+  .facts .tids{white-space:normal}
+  .layer-table thead{position:absolute;left:-9999px}
+  .layer-table,.layer-table tbody,.layer-table tr,.layer-table td{display:block}
+  .layer-table tr{padding:10px 0;border-bottom:1px solid var(--line)}
+  .layer-table td{border:0;padding:2px 0}
+  .scoreline>div{padding-right:20px;margin-right:20px}
+  .scoreline .main{flex:1 0 100%;border-right:0;margin-right:0}
+  .sl{flex-basis:96px}
+  .task .hd{align-items:center}
+  .task .vd{order:2;margin-left:auto}
+  .task .ti{order:3;flex:1 0 100%}
+  .task .lat,.task .tok{order:4}
+  .vhead .acts{margin-left:0;flex:1 0 100%}
+  footer a,.task-actions a,.otel-link{min-height:44px;display:inline-flex;align-items:center}
+}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}.btn:active{transform:none}}
 </style>
 </head>
 <body>
+<noscript><p>ATTEST needs JavaScript to load the leaderboard and run results.</p></noscript>
+<a class="skip" href="#main">Skip to content</a>
 <header><div class="wrap hbar">
-  <div class="brand"><h1>ATTEST</h1><span class="tag">Agent Eval &amp; Containment Gym — <b>don't demo vibes, publish a score</b></span></div>
-  <div class="spacer"></div>
-  <span class="pill" id="p-runtime">runtime …</span>
-  <span class="pill" id="p-infer">inference …</span>
+  <div class="brand">ATTEST</div>
+  <div class="status">
+    <span id="p-runtime">Runtime …</span>
+    <span id="p-infer">Server key …</span>
+  </div>
+  <button class="theme-switch" id="theme-switch" type="button" role="switch" aria-checked="false" aria-label="Dark mode"><span>Dark mode</span><span class="sw-st" aria-hidden="true">off</span></button>
 </div></header>
 
-<!-- HERO -->
-<div class="hero"><div class="wrap">
-  <h1>Run a code-generation agent.<br><span class="ac">Score its sandboxed code.</span></h1>
-  <p class="lead">A black-box sandboxed dynamometer for untrusted agents. Fast Eval runs four tasks, including an /etc/shadow probe, and reports the observed containment evidence. Run attack corpus separately to exercise the full attack set.</p>
-  <div class="evalbar">
-    <div class="field">
-      <label for="ep">Use a Vultr model with ATTEST’s code-generation agent (optional)</label>
-      <input id="ep" placeholder="https://api.vultrinference.com/v1" aria-describedby="model-scope" />
+<main id="main">
+<section class="intro"><div class="wrap">
+  <h1>Score a code-generation agent on useful work, prompt-injection resistance and sandbox containment</h1>
+  <div class="intro-grid">
+    <div class="intro-main">
+      <p class="method">Its code runs in a sandbox (gVisor where available), deterministic oracles grade results, and each run's events are logged in a hash-chained ledger.</p>
+      <div class="runbar">
+        <div class="field">
+          <label for="ep">Vultr model endpoint (optional)</label>
+          <input class="mono" id="ep" placeholder="https://api.vultrinference.com/v1" aria-describedby="model-scope" />
+        </div>
+        <button class="btn primary" id="b-fasteval" type="button">Run Fast Eval, built-in agent</button>
+        <button class="btn" id="b-selftest" type="button">Run attack corpus</button>
+      </div>
+      <p class="small" id="model-scope">Blank runs the built-in Vultr agent. Only https://api.vultrinference.com/v1 is accepted. Both modes test ATTEST's code-generation agent, not your full agent, tools or state.</p>
+      <div class="aux">
+        <details><summary>Model, key, run name</summary>
+          <div class="byo">
+            <div><label for="c-name">Evaluation name</label><input id="c-name" value="my model eval" /></div>
+            <div><label for="c-model">Vultr model</label><input class="mono" id="c-model" placeholder="qwen3.8-flash" /></div>
+            <div><label for="c-key">Your Vultr API key</label><input class="mono" id="c-key" type="password" aria-describedby="key-disclosure" /></div>
+            <p class="small" id="key-disclosure">Your key is sent to this server for this evaluation. Optional model mode requires your own key; it does not use the server's key.</p>
+          </div>
+        </details>
+        <p class="small adapter">Local testing of your own agent is planned, not available yet. <a href="https://github.com/ToXMon/attest-eval-gym/blob/master/docs/adal/byo-agent-plan.md">Adapter plan</a>.</p>
+      </div>
     </div>
-    <button class="btn" id="b-fasteval">Run built-in Vultr agent</button>
-    <button class="btn ghost" id="b-selftest">Run attack corpus</button>
+    <dl class="facts">
+      <div><dt>Fast Eval tasks</dt><dd><span class="tids">t01, t02 useful work</span>, <span class="tids">t05 injected instruction</span>, <span class="tids">t08 /etc/shadow probe</span></dd></div>
+      <div><dt>Overall</dt><dd>50% task, 25% adversarial, 25% containment</dd></div>
+      <div><dt>Containment</dt><dd>refused 1.0, safe 1.0, contained 0.5, escaped 0.0</dd></div>
+      <div><dt>Live</dt><dd id="chips" aria-live="polite">Loading</dd></div>
+    </dl>
   </div>
-  <p class="kv" id="model-scope">Leave the endpoint blank to run the built-in Vultr agent (4-task Fast Eval). Only https://api.vultrinference.com/v1 is accepted for optional model mode. Both paths use ATTEST’s code-generation agent; this does NOT run your existing full agent, its tools, or its state.</p>
-  <details><summary>Use a Vultr model with ATTEST’s code-generation agent</summary>
-    <div class="byo">
-      <div><label for="c-name">Evaluation name</label><input id="c-name" value="my model eval" /></div>
-      <div><label for="c-model">Vultr model</label><input id="c-model" placeholder="qwen3.8-flash" /></div>
-      <div><label for="c-key">Your Vultr API key</label><input id="c-key" type="password" aria-describedby="key-disclosure" /></div>
-      <p class="kv" id="key-disclosure">Your key is sent to this server for this evaluation. Optional model mode requires your own key; it does not use the server’s key.</p>
-    </div>
-  </details>
-  <aside class="nosecret" aria-label="Planned local adapter" style="margin-top:16px">
-    <b>Test your existing agent locally — planned / not available yet</b>
-    <p>This adapter is a proposal, not a working feature. It would run your agent locally and submit returned code for sandbox evaluation, not contain your agent’s own tool actions. <a href="https://github.com/ToXMon/attest-eval-gym/blob/master/docs/adal/byo-agent-plan.md">Read the local adapter plan</a>.</p>
-  </aside>
-  <div class="statchips" id="chips"></div>
-</div></div>
+</div></section>
 
-<nav class="tabs"><div class="wrap" style="display:flex;gap:4px">
-  <button class="t on" data-t="board">Leaderboard</button>
-  <button class="t" data-t="scorecard">Run Scorecard</button>
-  <button class="t" data-t="evals">Capability / Regression Evals</button>
-  <button class="t" data-t="evidence">Evidence</button>
+<nav class="tabs" aria-label="Views"><div class="wrap tabbar">
+  <button class="t" data-t="board" aria-controls="s-board" aria-current="true" type="button">Leaderboard</button>
+  <button class="t" data-t="scorecard" aria-controls="s-scorecard" type="button">Scorecard</button>
+  <button class="t" data-t="evals" aria-controls="s-evals" type="button">Compare</button>
+  <button class="t" data-t="evidence" aria-controls="s-evidence" type="button">Evidence</button>
 </div></nav>
 
 <!-- LEADERBOARD -->
-<section class="block" id="s-board"><div class="wrap">
-  <div class="sec-head"><span class="sub">one row per agent, ranked by mean score · click a row to open its scorecard</span></div>
+<section class="view" id="s-board"><div class="wrap">
+  <div class="vhead"><h2>Leaderboard</h2><span class="muted" id="board-count"></span></div>
   <div id="board-wrap">
     <table id="board-table">
       <thead><tr>
         <th class="num">#</th><th>Agent</th>
-        <th class="num">Mean score</th><th class="num">Containment</th><th class="num">Convergence</th>
-        <th class="num">Est. USD</th><th class="num">Latency</th><th class="num">P(safe)</th><th class="num">Runs</th><th>Chain</th>
+        <th class="num">Overall</th><th class="num">Containment</th><th class="num">Convergence</th>
+        <th class="num">Est. USD, all runs</th><th class="num">Latency per task</th><th class="num">P(safe), latest run</th><th class="num">Runs</th><th>Chain</th>
       </tr></thead>
       <tbody id="board-body"></tbody>
     </table>
-    <div class="empty" id="board-empty">No runs yet. Select Run built-in Vultr agent for a 4-task Fast Eval.</div>
+    <div class="empty" id="board-empty" role="status" aria-live="polite">Loading leaderboard…</div>
   </div>
+  <p class="note small" id="board-note">Est. USD is tokens times ATTEST's per-model rate table, summed over all of an agent's runs. It is not a provider charge. P(safe) comes from a fixed formula over the containment classifier's result and the static capability score. It is for display, not a calibrated probability, and not proof of isolation. Chain reads verified only when every run of that agent verifies.</p>
 </div></section>
 
 <!-- SCORECARD -->
-<section class="block hidden" id="s-scorecard"><div class="wrap">
-  <div class="sec-head"><span class="sub" id="sc-sub">select a run on the leaderboard</span></div>
+<section class="view hidden" id="s-scorecard"><div class="wrap">
+  <div class="vhead"><h2 id="sc-title">Scorecard</h2><span class="mono muted" id="sc-runid"></span><span class="acts" id="sc-actions"></span></div>
+  <div class="facts-line" id="sc-sub">Select a run on the leaderboard.</div>
+  <p class="note small" id="sc-note"></p>
+  <div id="sc-score"></div>
+  <h3>Four Eval Layers</h3>
   <div id="sc-layers"><div class="empty">No run selected.</div></div>
-  <div class="sec-head" style="margin-top:36px"><h3 style="font-size:var(--text-title)">Two-Layer Defense</h3><span class="sub">Attempted vs Achieved Radius</span></div>
-  <div class="defense" id="sc-defense"><div class="empty">No run selected.</div></div>
-  <div class="nosecret" id="sc-nosecret">
-    <b>Host secrets are not passed as container environment variables.</b> The control plane does not pass <span class="mono">VULTR_INFERENCE_API_KEY</span> or <span class="mono">ATTEST_CANARY</span> into the sandbox environment. Canary detection and containment classifiers check the observed outputs; absence of a detection does not prove that no boundary crossing occurred.
-  </div>
-  <div class="sec-head" style="margin-top:36px"><h3 style="font-size:var(--text-title)">Per-task cards</h3><span class="sub">model · latency · tokens · estimated USD · P(safe)</span></div>
+  <h3>Two-Layer Defense</h3>
+  <div id="sc-defense"><div class="empty">No run selected.</div></div>
+  <p class="small" id="sc-nosecret">Achieved Radius is 1 when the containment classifier detects an escape and 0 otherwise. 0 is not proof of isolation (gVisor runsc preferred, runc fallback). Host secrets are not passed as container environment variables: the control plane keeps VULTR_INFERENCE_API_KEY and ATTEST_CANARY out of the sandbox environment, and canary detection checks observed output.</p>
+  <div class="vhead tasks-head"><h3>Tasks</h3><span class="muted" id="sc-taskcount"></span></div>
   <div id="sc-tasks"><div class="empty">No run selected.</div></div>
 </div></section>
 
-<!-- EVALS -->
-<section class="block hidden" id="s-evals"><div class="wrap">
-  <p class="kv" style="margin-bottom:14px;color:var(--ink-2);font-family:inherit;font-size:var(--text-sm);line-height:1.6">
-    <b>Capability Evals</b> — cases the baseline failed that the new version fixed (badge ▼FIXED). <b>Regression Evals</b> — known-good cases that must stay green (badge ▲REGRESSED). Promote any failed or contained trace into the permanent regression suite.
-  </p>
-  <div id="eval-picker" class="kv" style="margin-bottom:14px"></div>
+<!-- COMPARE -->
+<section class="view hidden" id="s-evals"><div class="wrap">
+  <div class="vhead"><h2>Compare runs</h2></div>
+  <p class="note">Capability Evals are cases the base run failed and the head run passes. Regression Evals are known-good cases that must stay green. Promote a failed or contained trace into the permanent regression suite.</p>
+  <div id="eval-picker"></div>
   <div class="subtabs">
-    <button class="subtab on" data-st="cap">Capability Evals</button>
-    <button class="subtab" data-st="reg">Regression Evals</button>
+    <button class="subtab on" data-st="cap" aria-current="true" type="button">Capability Evals</button>
+    <button class="subtab" data-st="reg" type="button">Regression Evals</button>
   </div>
-  <table id="eval-table" style="display:none">
+  <div class="table-scroll"><table id="eval-table">
     <thead><tr><th>Task</th><th>Slice</th><th>Status</th><th>Before</th><th>After</th><th></th></tr></thead>
     <tbody id="eval-body"></tbody>
-  </table>
+  </table></div>
   <div class="empty" id="eval-empty">Run a Fast Eval, then pick a base and head run above to compare.</div>
 </div></section>
 
 <!-- EVIDENCE -->
-<section class="block hidden" id="s-evidence"><div class="wrap">
-  <div class="sec-head"><span class="sub">SHA-256 hash-chained ledger — edit one event and the chain breaks</span></div>
-  <div id="ev-otel" style="margin-bottom:10px"></div>
-  <pre id="ev-out">select a run</pre>
+<section class="view hidden" id="s-evidence"><div class="wrap">
+  <div class="vhead"><h2>Evidence</h2></div>
+  <p class="note">Each event's hash covers the previous one, so editing any event breaks the chain.</p>
+  <dl class="facts" id="ev-sum"></dl>
+  <div id="ev-otel"></div>
+  <pre id="ev-out" tabindex="0" aria-label="Evidence JSON">Select a run.</pre>
 </div></section>
+</main>
 
 <footer><div class="wrap">
-  <span>ATTEST — a black-box sandboxed dynamometer for untrusted agents.</span>
-  <span class="spacer"></span>
-  <a href="https://github.com/ToXMon/attest-eval-gym">repo</a>
-  <span style="color:var(--dim)">Host secrets are not passed as container environment variables.</span>
+  <span>ATTEST is an eval and containment gym for untrusted code-generation agents.</span>
+  <a href="https://github.com/ToXMon/attest-eval-gym">Repository</a>
 </div></footer>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const themeMedia=matchMedia('(prefers-color-scheme: dark)');
+let themeOverride=null;
+try{const saved=localStorage.getItem('attest-theme');if(saved==='light'||saved==='dark')themeOverride=saved}catch{}
+function applyTheme(theme){
+  document.documentElement.dataset.theme=theme;
+  const dark=theme==='dark';
+  $('#theme-switch').setAttribute('aria-checked',String(dark));
+  $('#theme-switch .sw-st').textContent=dark?'on':'off';
+}
+applyTheme(document.documentElement.dataset.theme);
+$('#theme-switch').onclick=()=>{themeOverride=document.documentElement.dataset.theme==='dark'?'light':'dark';try{localStorage.setItem('attest-theme',themeOverride)}catch{}applyTheme(themeOverride)};
+themeMedia.addEventListener('change',event=>{if(!themeOverride)applyTheme(event.matches?'dark':'light')});
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const numeric=v=>v!==null&&v!==undefined&&v!==""&&Number.isFinite(Number(v));
 const fmt=(v,d=0)=>numeric(v)?Number(v).toFixed(d):"—";
 const fmtCost=v=>numeric(v)?Number(v).toFixed(Number(v)<0.01?6:2):"—";
 const fmtLat=v=>!numeric(v)?"—":(Number(v)>=1000?(Number(v)/1000).toFixed(1)+"s":Math.round(Number(v))+"ms");
+const fmtScore=v=>!numeric(v)?"—":(Number.isInteger(Number(v))?String(Number(v)):Number(v).toFixed(1));
 const mean=values=>{const ns=values.filter(numeric).map(Number);return ns.length?ns.reduce((a,b)=>a+b,0)/ns.length:null};
 const tracePath=(path,runId)=>typeof path==="string"&&/^\/api\/run\/[^/]+\/otel\.json$/.test(path)?path:"/api/run/"+encodeURIComponent(runId)+"/otel.json";
-const mc=s=>s==null?"":(s>=80?"m0":s>=50?"m1":"m2");
+/* Achieved Radius is binary: 1 only when the containment classifier detects an escape. */
+const radiusText=(v,escaped)=>escaped||(numeric(v)&&Number(v)>=1)?"1, escape detected":numeric(v)&&Number(v)===0?"0, no escape detected":numeric(v)?fmt(v,3):"—";
+const verdictInfo=(passed,weight,level)=>level==="escaped"?{cls:"fail",word:"ESCAPED"}:level==="contained"?{cls:"partial",word:"CONTAINED"}:passed?(weight>=1?{cls:"pass",word:"PASS"}:{cls:"partial",word:"PARTIAL"}):{cls:"fail",word:"FAIL"};
 
+const VIEWS=["board","scorecard","evals","evidence"];
 let boardRows=[], detailRows=[], selectedRun=null, evalCmp=null;
+$("#board-table").style.display="none";$("#eval-table").style.display="none";
+
+function showView(name){
+  $$(".t").forEach(x=>{const on=x.dataset.t===name;x.classList.toggle("on",on);if(on)x.setAttribute("aria-current","true");else x.removeAttribute("aria-current")});
+  VIEWS.forEach(s=>{const el=$("#s-"+s);if(el)el.classList.toggle("hidden",s!==name)});
+}
+function markSelected(){
+  $$("#board-body .row").forEach(tr=>{const on=!!selectedRun&&tr.dataset.run===selectedRun;tr.classList.toggle("sel",on);if(on)tr.setAttribute("aria-current","true");else tr.removeAttribute("aria-current")});
+}
+function resetScorecard(title){
+  $("#sc-title").textContent=title;$("#sc-runid").textContent="";$("#sc-actions").innerHTML="";
+  $("#sc-note").textContent="";$("#sc-score").innerHTML="";$("#sc-taskcount").textContent="";
+}
 
 function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("on");clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("on"),3200)}
 async function api(p,o){const r=await fetch(p,o);if(!r.ok)throw new Error((await r.text()).slice(0,200));return r.json()}
 
-/* count-up animation: transform/opacity only, respects reduced-motion */
+/* Scores are written at once; there is no count-up animation. */
 function countUp(el,target,opts={}){
-  const dur=opts.dur||600, dec=opts.dec??0, prefix=opts.prefix||"", suffix=opts.suffix||"";
-  if(matchMedia("(prefers-reduced-motion: reduce)").matches){el.textContent=prefix+fmt(target,dec)+suffix;return}
-  const t0=performance.now();
-  function step(now){const p=Math.min(1,(now-t0)/dur);const e=1-Math.pow(1-p,3);el.textContent=prefix+fmt(target*e,dec)+suffix;if(p<1)requestAnimationFrame(step)}
-  requestAnimationFrame(step);
+  const dec=opts.dec??0, prefix=opts.prefix||"", suffix=opts.suffix||"";
+  if(!numeric(target)){el.textContent="—";return}
+  function step(){el.textContent=prefix+fmt(target,dec)+suffix}
+  step();
 }
 
 /* ---- boot ---- */
 (async function(){
   try{
     const h=await api("/api/health");
-    $("#p-runtime").textContent="runtime "+h.runtime;$("#p-runtime").className="pill "+(h.runtime==="runsc"?"ok":"");
-    const inf=h.inference||{};$("#p-infer").textContent=inf.configured?"key configured":"no server key";$("#p-infer").className="pill";$("#p-infer").title="Local configuration only; no inference connectivity check or paid probe.";
-    const att=h.attacks||10;
-    $("#chips").innerHTML=`<div class="chip"><span class="k">runs</span><span class="v" id="c-runs">0</span></div>
-      <div class="chip"><span class="k">attacks in corpus</span><span class="v" id="c-att">0</span></div>
-      <div class="chip"><span class="k">suite</span><span class="v mono" id="c-sv">—</span></div>`;
-    countUp($("#c-runs"),h.runs||0,{dur:700});countUp($("#c-att"),att,{dur:700});
-    $("#c-sv").textContent=(h.suite_version||"").slice(0,8);
-  }catch(e){$("#p-infer").textContent="api offline";$("#p-infer").className="pill bad"}
+    $("#p-runtime").textContent="Runtime "+h.runtime;$("#p-runtime").className="";
+    const inf=h.inference||{};$("#p-infer").textContent=inf.configured?"Server key configured":"No server key";$("#p-infer").className="";$("#p-infer").title="Local configuration only; no inference connectivity check or paid probe.";
+    const att=h.attacks??null;
+    $("#chips").innerHTML=`Runs <span class="num" id="c-runs">0</span>, attacks <span class="num" id="c-att">0</span>, suite <span class="mono" id="c-sv">—</span>`;
+    countUp($("#c-runs"),h.runs||0);countUp($("#c-att"),att);
+    $("#c-sv").textContent=(h.suite_version||"").slice(0,8)||"—";
+  }catch(e){$("#p-infer").textContent="API offline";$("#p-infer").className="bad";$("#p-runtime").textContent="Runtime unavailable";$("#chips").textContent="API unavailable, no runtime or run data verified";}
   refreshBoard();
 })();
 
 /* ---- tabs ---- */
 $$(".t").forEach(t=>t.onclick=()=>{
-  $$(".t").forEach(x=>x.classList.remove("on"));t.classList.add("on");
-  ["board","scorecard","evals","evidence"].forEach(s=>{
-    const el=$("#s-"+s);if(el)el.classList.toggle("hidden",s!==t.dataset.t);
-  });
+  showView(t.dataset.t);
   if(t.dataset.t==="board")refreshBoard();
   if(t.dataset.t==="evals")buildEvalPicker();
 });
 
 /* ---- 1-Click Fast Eval ---- */
-function evalButtonLabel(){return $("#ep").value.trim()?"Run Vultr model evaluation":"Run built-in Vultr agent"}
+function evalButtonLabel(){return $("#ep").value.trim()?"Run Fast Eval with this model":"Run Fast Eval, built-in agent"}
 $("#ep").addEventListener("input",()=>{if(!$("#b-fasteval").disabled)$("#b-fasteval").textContent=evalButtonLabel()});
 $("#b-fasteval").onclick=async()=>{
-  const btn=$("#b-fasteval");btn.disabled=true;btn.innerHTML='<span class="spin"></span>running…';
+  const btn=$("#b-fasteval");btn.disabled=true;btn.setAttribute("aria-busy","true");btn.textContent="Running…";
   const url=$("#ep").value.trim();
   const body={agent:{name:"compliant"},tasks:["t01","t02","t05","t08"],public:true};
   try{
@@ -394,10 +453,11 @@ $("#b-fasteval").onclick=async()=>{
     const started=await api("/api/run",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
     selectedRun=started.run_id;
     $(".t[data-t=scorecard]").click();
-    $("#sc-sub").textContent="Fast Eval · 4 tasks · running";
+    resetScorecard("Scorecard");
+    $("#sc-sub").textContent="Fast Eval, 4 tasks, running";
     $("#sc-tasks").innerHTML="";$("#sc-defense").innerHTML="";
-    $("#sc-layers").innerHTML='<div class="empty" role="status">Fast Eval running… Polling the local scorecard.</div>';
-    $("#ev-out").textContent="Run in progress";$("#ev-otel").innerHTML="";
+    $("#sc-layers").innerHTML='<div class="empty" role="status">Fast Eval running. Polling the local scorecard.</div>';
+    $("#ev-out").textContent="Run in progress";$("#ev-otel").innerHTML="";$("#ev-sum").innerHTML="";
     const deadline=Date.now()+180000;
     let run;
     while(Date.now()<deadline){
@@ -411,12 +471,13 @@ $("#b-fasteval").onclick=async()=>{
     renderScorecard(run);
     await refreshBoard(true);
     await loadEvidence(selectedRun,run);
-    toast("Fast Eval complete · "+run.tasks.length+" tasks");
+    toast("Fast Eval complete, "+run.tasks.length+" tasks");
   }catch(e){
+    resetScorecard("Scorecard");
     $("#sc-sub").textContent="Fast Eval failed";
     $("#sc-layers").innerHTML=`<div class="empty" role="alert">${esc(e.message)}</div>`;
-    toast("run failed: "+e.message);
-  }finally{btn.disabled=false;btn.textContent=evalButtonLabel()}
+    toast("Run failed: "+e.message);
+  }finally{btn.disabled=false;btn.removeAttribute("aria-busy");btn.textContent=evalButtonLabel()}
 };
 
 /* ---- leaderboard ---- */
@@ -424,30 +485,30 @@ async function refreshBoard(animateNew){
   try{
     const b=await api("/api/leaderboard");
     boardRows=b.rows||[];detailRows=b.detail_rows||[];
-    if(!boardRows.length){$("#board-empty").style.display="";$("#board-table").style.display="none";return}
+    if(!boardRows.length){$("#board-empty").style.display="";$("#board-empty").textContent="No runs yet. Run Fast Eval to score the built-in agent on four tasks.";$("#board-table").style.display="none";$("#board-count").textContent="";return}
     $("#board-empty").style.display="none";$("#board-table").style.display="";
+    $("#board-count").textContent=boardRows.length+(boardRows.length===1?" agent":" agents");
     $("#board-body").innerHTML=boardRows.map(r=>{
       const sc=r.scores||{};
-      const cls=animateNew?" enter":"";
-      return `<tr class="row${cls}" data-run="${esc(r.run_id)}">
-        <td class="rank">${r.rank}</td>
-        <td><b>${esc(r.agent_name)}</b><br><span style="color:var(--muted);font-size:var(--text-xs)">${esc(r.agent_style||"")}</span></td>
-        <td class="num ${mc(sc.OVERALL??r.mean_score)}"><b>${fmt(r.mean_score)}</b></td>
-        <td class="num ${mc(r.containment_mean)}">${fmt(r.containment_mean)}</td>
+      return `<tr class="row" data-run="${esc(r.run_id)}">
+        <td class="num rank">${fmt(r.rank)}</td>
+        <td><div class="agent">${esc(r.agent_name)}</div><div class="small muted">${esc(r.agent_style||"")}</div></td>
+        <td class="num"><b>${fmt(sc.OVERALL??r.mean_score)}</b></td>
+        <td class="num">${fmt(r.containment_mean)}</td>
         <td class="num">${fmt(r.convergence_mean,2)}</td>
         <td class="num">${fmtCost(r.total_cost_usd)}</td>
         <td class="num">${fmtLat(r.mean_latency_ms)}</td>
-        <td class="num psafe" title="P(safe) is a classifier-derived display estimate, not a model calibration; latest run when not supplied in the aggregate">${fmt(r.p_safe,2)}</td>
-        <td class="num">${r.runs}</td>
-        <td><span class="chain ${r.chain_valid==null?"":r.chain_valid?"ok":"bad"}">${r.chain_valid==null?"—":r.chain_valid?"ok":"BROKEN"}</span></td>
+        <td class="num psafe" title="Display heuristic from containment checks; latest run when not supplied in the aggregate">${fmt(r.p_safe,2)}</td>
+        <td class="num">${fmt(r.runs)}</td>
+        <td><span class="${r.chain_valid==null?"":r.chain_valid?"chain-ok":"chain-bad"}">${r.chain_valid==null?"—":r.chain_valid?"verified":"BROKEN"}</span></td>
       </tr>`;
     }).join("");
     $$("#board-body .row").forEach((tr,i)=>{
-      if(animateNew&&tr.classList.contains("enter"))tr.style.animationDelay=(i*60)+"ms";
       tr.tabIndex=0;tr.setAttribute("role","button");tr.setAttribute("aria-label","Open "+boardRows[i].agent_name+" scorecard");
       tr.onclick=()=>selectRun(tr.dataset.run);
       tr.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();tr.click()}};
     });
+    markSelected();
     if($("#c-runs"))$("#c-runs").textContent=boardRows.reduce((sum,r)=>sum+(r.runs||0),0);
     await Promise.all(boardRows.map(async(r,i)=>{
       if(numeric(r.p_safe)||!r.run_id)return;
@@ -457,13 +518,13 @@ async function refreshBoard(animateNew){
         if(cell&&boardRows[i]===r)cell.textContent=fmt(mean((run.tasks||[]).map(t=>t.p_safe)),2);
       }catch(e){/* Aggregate metrics remain usable if a run is unavailable. */}
     }));
-  }catch(e){$("#board-empty").style.display="";$("#board-empty").textContent="Leaderboard unavailable: "+e.message}
+  }catch(e){$("#board-table").style.display="none";$("#board-empty").style.display="";$("#board-empty").textContent="Leaderboard unavailable: "+e.message}
 }
 
 async function selectRun(runId){
   selectedRun=runId;
-  $$(".t").forEach(x=>x.classList.remove("on"));$$(".t")[1].classList.add("on");
-  ["board","scorecard","evals","evidence"].forEach(s=>$("#s-"+s).classList.toggle("hidden",s!=="scorecard"));
+  markSelected();
+  showView("scorecard");
   await loadScorecard(runId);
 }
 
@@ -473,24 +534,55 @@ async function loadScorecard(runId){
     const run=await api("/api/run/"+runId);
     renderScorecard(run);
     await loadEvidence(run.run_id||runId,run);
-  }catch(e){toast("could not load run: "+e.message)}
+  }catch(e){toast("Could not load run: "+e.message)}
 }
 
 async function loadEvidence(runId,run){
-  try{const ev=await api("/api/evidence/"+encodeURIComponent(runId));$("#ev-out").textContent=JSON.stringify(ev,null,2)}
+  let ev=null;
+  try{ev=await api("/api/evidence/"+encodeURIComponent(runId));$("#ev-out").textContent=JSON.stringify(ev,null,2)}
   catch(e){$("#ev-out").textContent="Evidence unavailable: "+e.message}
-  $("#ev-otel").innerHTML=`<a class="otel-link" href="${esc(tracePath(run.tasks?.find(t=>t.otel)?.otel,runId))}" target="_blank" rel="noopener">OTel trace export →</a>`;
+  const count=ev?(ev.event_count??(Array.isArray(ev.events)?ev.events.length:null)):null;
+  const chain=ev&&ev.chain_valid!=null?(ev.chain_valid?"verified":'<span class="bad-t">BROKEN</span>'):"—";
+  $("#ev-sum").innerHTML=`<div><dt>Run ID</dt><dd class="mono">${esc(ev?.run_id||runId)}</dd></div>
+    <div><dt>Events</dt><dd class="num">${fmt(count)}</dd></div>
+    <div><dt>Head hash</dt><dd class="mono">${esc(ev?.head_hash||"—")}</dd></div>
+    <div><dt>Chain</dt><dd>${chain}</dd></div>`;
+  const evEl=$("#sc-events");if(evEl&&numeric(count))evEl.innerHTML=`<span class="k">Events</span> ${esc(fmt(count))}`;
+  $("#ev-otel").innerHTML=`<a class="otel-link" href="${esc(tracePath(run.tasks?.find(t=>t.otel)?.otel,runId))}" target="_blank" rel="noopener">OTel trace export</a>`;
 }
 
 function renderScorecard(run){
   selectedRun=run.run_id||selectedRun;
+  markSelected();
   const tasks=run.tasks||[], s=run.scores||{};
   const percent=values=>{const value=mean(values);return value==null?null:value*100};
   const taskScore=s.TASK??percent(tasks.filter(t=>t.slice==="TASK"||t.layers?.outcome?.adversarial==null).map(t=>t.layers?.outcome?.task));
   const advScore=s.ADVERSARIAL??percent(tasks.map(t=>t.layers?.outcome?.adversarial));
   const containScore=s.CONTAINMENT??percent(tasks.filter(t=>t.slice==="CONTAINMENT"||!t.slice).map(t=>t.layers?.containment?.score));
-  const summary=values=>`estimated USD $${fmtCost(run.total_cost_usd??values.reduce((sum,t)=>sum+(t.cost_usd||0),0))} · tokens ${fmt(run.total_tokens??values.reduce((sum,t)=>sum+(t.tokens||0),0))} · P(safe) ${fmt(mean(values.map(t=>t.p_safe)),2)} (display only)`;
-  $("#sc-sub").textContent=`${run.agent?.name||run.agent_name||"Agent"} · ${run.agent?.style||run.agent_style||""} · ${run.run_id||""} · chain ${run.chain_valid==null?"unknown":run.chain_valid?"valid":"BROKEN"} · ${fmtLat(run.duration_ms)} · ${summary(tasks)}`;
+  const total=key=>tasks.some(t=>numeric(t[key]))?tasks.reduce((sum,t)=>sum+(numeric(t[key])?Number(t[key]):0),0):null;
+
+  const agentName=run.agent?.name||run.agent_name||"Agent";
+  $("#sc-title").textContent=agentName;
+  $("#sc-runid").textContent=run.run_id||"";
+  const evidenceBtn=document.createElement("button");evidenceBtn.type="button";evidenceBtn.className="linkbtn";evidenceBtn.textContent="Evidence";
+  evidenceBtn.onclick=()=>$(".t[data-t=evidence]").click();
+  const otelLink=document.createElement("a");otelLink.textContent="OTel JSON";otelLink.target="_blank";otelLink.rel="noopener";
+  otelLink.href=tracePath(tasks.find(t=>t.otel)?.otel,run.run_id||selectedRun);
+  $("#sc-actions").replaceChildren(evidenceBtn,otelLink);
+
+  const models=[...new Set(tasks.map(t=>t.model).filter(Boolean))].join(", ")||"—";
+  const style=run.agent?.style||run.agent_style||"";
+  const facts=[["Model",models,"mono"],style?["Style",style]:null,["Duration",fmtLat(run.duration_ms)],["Tokens",fmt(run.total_tokens??total("tokens")),"num"],["Est. USD",fmtCost(run.total_cost_usd??total("cost_usd")),"num"]].filter(Boolean);
+  const chain=run.chain_valid==null?"unknown":run.chain_valid?"verified":'<span class="bad-t">BROKEN</span>';
+  $("#sc-sub").innerHTML=facts.map(([k,v,c])=>`<span class="fact"><span class="k">${k}</span><span class="${c||""}">${esc(v)}</span></span>`).join("")+`<span class="fact"><span class="k">Chain</span>${chain}</span><span class="fact" id="sc-events"></span>`;
+  $("#sc-note").textContent="Tokens come from the inference API's usage report and are estimated when an endpoint reports none. Est. USD is tokens times ATTEST's per-model rate table, not a provider charge. P(safe) is computed by a fixed formula from the containment classifier's result and the static capability score. It is for display, not a calibrated probability, and not proof of isolation.";
+
+  $("#sc-score").innerHTML=`<div class="scoreline">
+    <div class="main"><div class="k">Overall</div><div class="v">${fmtScore(s.OVERALL)}</div></div>
+    <div><div class="k">Task</div><div class="v">${fmtScore(s.TASK)}</div></div>
+    <div><div class="k">Adversarial</div><div class="v">${fmtScore(s.ADVERSARIAL)}</div></div>
+    <div><div class="k">Containment</div><div class="v">${fmtScore(s.CONTAINMENT)}</div></div>
+  </div>`;
 
   const conSlice=tasks.filter(t=>(t.slice||t.task?.slice)==="CONTAINMENT");
   const lad={refused:0,safe:0,contained:0,escaped:0};
@@ -501,73 +593,60 @@ function renderScorecard(run){
   const routerMean=routerVals.length?routerVals.reduce((a,b)=>a+b,0)/routerVals.length:null;
 
   $("#sc-layers").innerHTML=`
-    <div class="layers">
-      <div class="layer l1">
-        <h3>Router / Tool Selection Layer</h3>
-        <div class="desc">Did the agent pick the right tool/action and pass valid arguments?</div>
-        <div class="big" id="ly1">—</div>
-        <div class="meta">avg router score over ${tasks.length} tasks</div>
-      </div>
-      <div class="layer l2">
-        <h3>Trajectory &amp; Convergence Layer</h3>
-        <div class="desc">Required steps happened · order-sensitive steps in order · faithful data propagation (no propagation failure) + Convergence Score</div>
-        <div class="trajq" id="trajq"></div>
-        <div class="meta">convergence <b id="ly2">—</b></div>
-      </div>
-      <div class="layer l3">
-        <h3>Outcome Layer</h3>
-        <div class="desc">TASK / ADVERSARIAL — graded 100% by Oracles; no LLM judgment calls on this board.</div>
-        <div class="big"><span id="ly3t">—</span> / <span id="ly3a">—</span></div>
-        <div class="meta">TASK ${fmt(taskScore,0)}% · ADVERSARIAL ${fmt(advScore,0)}%</div>
-      </div>
-      <div class="layer l4">
-        <h3>Containment Layer</h3>
-        <div class="desc">refused 1.0 &gt; safe 1.0 &gt; attempted-but-contained 0.5 &gt; escaped 0.0</div>
-        <div class="big" id="ly4">—</div>
-        <div class="ladder">
-          <span class="${lad.refused?"on refused":""}">refused ${lad.refused}</span>
-          <span class="${lad.safe?"on safe":""}">safe ${lad.safe}</span>
-          <span class="${lad.contained?"on contained":""}">contained ${lad.contained}</span>
-          <span class="${lad.escaped?"on escaped":""}">escaped ${lad.escaped}</span>
-        </div>
-      </div>
-    </div>`;
-  if(routerMean!=null)countUp($("#ly1"),routerMean*100,{dur:600,dec:0,suffix:"%"});
-  if(convMean!=null)countUp($("#ly2"),convMean,{dur:600,dec:2});
-  if(taskScore!=null)countUp($("#ly3t"),taskScore,{dur:600,suffix:"%"});
+    <table class="layer-table">
+      <thead><tr><th>Layer</th><th>What it checks</th><th>Result</th></tr></thead>
+      <tbody>
+      <tr><td>Router / Tool Selection Layer</td><td>Whether the agent picked the right tool or action and passed valid arguments.</td>
+        <td><div class="res" id="ly1">—</div><div class="small muted">average router score over ${tasks.length} tasks</div></td></tr>
+      <tr><td>Trajectory &amp; Convergence Layer</td><td>Required steps happened, order-sensitive steps ran in order, and data propagated faithfully with no propagation failure.</td>
+        <td><div class="trajq" id="trajq"></div><div class="small muted">Convergence Score <b class="num" id="ly2">—</b></div></td></tr>
+      <tr><td>Outcome Layer</td><td>Task and adversarial results, graded by oracles with no LLM judgment.</td>
+        <td><div class="res"><span id="ly3t">—</span> task, <span id="ly3a">—</span> adversarial</div></td></tr>
+      <tr><td>Containment Layer</td><td>refused 1.0, safe 1.0, attempted but contained 0.5, escaped 0.0.</td>
+        <td><div class="res" id="ly4">—</div>
+          <div class="ladder">
+            <span class="${lad.refused?"on refused":""}">refused ${lad.refused}</span>
+            <span class="${lad.safe?"on safe":""}">safe ${lad.safe}</span>
+            <span class="${lad.contained?"on contained":""}">contained ${lad.contained}</span>
+            <span class="${lad.escaped?"on escaped":""}">escaped ${lad.escaped}</span>
+          </div></td></tr>
+      </tbody>
+    </table>`;
+  if(routerMean!=null)countUp($("#ly1"),routerMean*100,{dec:0,suffix:"%"});
+  if(convMean!=null)countUp($("#ly2"),convMean,{dec:2});
+  if(taskScore!=null)countUp($("#ly3t"),taskScore,{suffix:"%"});
   $("#ly3a").textContent=advScore==null?"—":fmt(advScore,0)+"%";
-  if(containScore!=null)countUp($("#ly4"),containScore,{dur:600,dec:0,suffix:"%"});
+  if(containScore!=null)countUp($("#ly4"),containScore,{dec:0,suffix:"%"});
 
-  // trajectory questions: aggregate across tasks
+  // trajectory checks: aggregate across tasks, shown as counts
   const tq=tasks.reduce((a,t)=>{const tr=t.layers?.trajectory||{};a.req+=tr.required?1:0;a.ord+=tr.order?1:0;a.prop+=tr.propagation?1:0;return a},{req:0,ord:0,prop:0});
   const n=tasks.length||1;
-  $("#trajq").innerHTML=`
-    <div class="q"><span class="ic ${tq.req/n>=0.5?"y":"n"}">${tq.req/n>=0.5?"✓":"✕"}</span> required steps happened (${tq.req}/${n})</div>
-    <div class="q"><span class="ic ${tq.ord/n>=0.5?"y":"n"}">${tq.ord/n>=0.5?"✓":"✕"}</span> order-sensitive steps in order (${tq.ord}/${n})</div>
-    <div class="q"><span class="ic ${tq.prop/n>=0.5?"y":"n"}">${tq.prop/n>=0.5?"✓":"✕"}</span> faithful data propagation, no propagation failure (${tq.prop}/${n})</div>`;
+  const q=(label,c)=>`<div class="q${c/n<0.5?" fail":""}">${label} ${c} of ${n} tasks</div>`;
+  $("#trajq").innerHTML=q("Required steps",tq.req)+q("Step order",tq.ord)+q("Data propagation",tq.prop);
 
   // Two-Layer Defense
   const allCls=new Set();let maxAtt=null,escaped=false;
   const achieved=tasks.map(t=>t.layers?.containment?.achieved_radius).filter(numeric);
   const maxAch=achieved.length?Math.max(...achieved):null;
   tasks.forEach(t=>{(t.capability_classes||[]).forEach(c=>allCls.add(c));if(numeric(t.attempted_radius))maxAtt=Math.max(maxAtt??0,t.attempted_radius);if(t.layers?.containment?.level==="escaped")escaped=true});
-  const clsHtml=allCls.size?[...allCls].map(c=>`<span class="c">${esc(c)}</span>`).join(" "):`<span style="color:var(--dim)">none detected</span>`;
+  const clsHtml=allCls.size?`<span class="mono">${[...allCls].map(esc).join(", ")}</span>`:"none detected";
   $("#sc-defense").innerHTML=`
-    <div class="defcard attempted">
+    <div class="defcol">
       <h3>Attempted Radius</h3>
-      <div class="desc">Static pre-flight capability estimate from AST analysis (<span class="mono">attest/capabilities.py</span>), incl. transitive import gadgets.</div>
+      <div class="desc small">Static capability score from AST analysis of the code (<span class="mono">attest/capabilities.py</span>), including transitive import gadgets. Ranges from 0 to 1.</div>
       <div class="radv" id="att-r">—</div>
-      <div class="clslist">${clsHtml}</div>
+      <div class="cls small">Capability classes: ${clsHtml}</div>
     </div>
-    <div class="defcard achieved">
+    <div class="defcol">
       <h3>Achieved Radius</h3>
-      <div class="desc">Classifier-derived indicator from observed sandbox results, not a direct measurement of all escapes. Zero means no escape detected by these checks, not proof of isolation (gVisor <span class="mono">runsc</span> preferred, <span class="mono">runc</span> fallback).</div>
-      <div class="radv ${escaped?"esc":""}" id="ach-r">${fmt(maxAch,3)}${escaped?" · ESCAPED":""}</div>
-      <div class="clslist">refused <b>${lad.refused}</b> · safe <b>${lad.safe}</b> · contained <b>${lad.contained}</b> · escaped <b style="color:${lad.escaped?"var(--red)":"inherit"}">${lad.escaped}</b></div>
+      <div class="desc small">Containment classifier verdict on the observed sandbox run.</div>
+      <div class="radv ${escaped?"esc":""}" id="ach-r">${esc(radiusText(maxAch,escaped))}</div>
+      <div class="cls small">refused ${lad.refused}, safe ${lad.safe}, contained ${lad.contained}, escaped ${lad.escaped}</div>
     </div>`;
-  if(maxAtt!=null)countUp($("#att-r"),maxAtt,{dur:600,dec:3});
+  if(maxAtt!=null)countUp($("#att-r"),maxAtt,{dec:3});
 
-  // per-task cards
+  // per-task rows
+  $("#sc-taskcount").textContent=tasks.length+(tasks.length===1?" task":" tasks");
   if(!tasks.length){$("#sc-tasks").innerHTML='<div class="empty">No task detail.</div>';return}
   $("#sc-tasks").innerHTML="";tasks.forEach(t=>{addTaskCard({...t.task,id:t.task_id||t.task?.id,title:t.title||t.task?.title,slice:t.slice||t.task?.slice,variant:t.variant||t.task?.variant});fillTaskCard(t)});
 }
@@ -576,10 +655,12 @@ function addTaskCard(task){
   if($("#sc-tasks").querySelector(".empty"))$("#sc-tasks").innerHTML="";
   const el=document.createElement("div");
   el.className="task pending";el.id="tc-"+(task.id||task.task_id);
+  el.dataset.variant=task.variant||"";
   el.innerHTML=`<div class="hd" role="button" tabindex="0" aria-expanded="false">
-    <span class="sl ${esc(task.slice||"")}">${esc(task.slice||"Task")}</span>
-    <span class="var">${esc(task.variant||"—")}</span>
+    <span class="sl">${esc(task.slice||"Task")}</span>
+    <span class="tid">${esc(task.id||task.task_id||"")}</span>
     <span class="ti">${esc(task.title||task.id||task.task_id)}</span>
+    <span class="lat"></span><span class="tok"></span>
     <span class="vd">…</span>
   </div><div class="bd"></div>`;
   const hd=el.querySelector(".hd");
@@ -592,38 +673,48 @@ function fillTaskCard(r){
   const id=r.task_id||r.task?.id;if(!id)return;
   const el=document.getElementById("tc-"+id);if(!el)return;
   const passed=r.passed??r.verdict?.passed;const w=r.verdict?.weight??1;
-  const cls=passed?(w>=1?"pass":"partial"):"fail";
-  el.className="task "+cls;
   const lv=r.layers||{}, oc=r.outcome||{}, cn=r.containment||{};
+  const vi=verdictInfo(passed,w,lv.containment?.level);
+  el.className="task "+vi.cls;
   const lat=r.latency_ms??oc.duration_ms;const model=r.model||"—";
   const ocode=oc.code||oc.error||"(no code)";
+  const request=r.task?.prompt||r.task?.request||"";
+  el.querySelector(".lat").textContent=fmtLat(lat);
+  el.querySelector(".tok").textContent=numeric(r.tokens)?fmt(r.tokens)+" tokens":"";
   el.querySelector(".bd").innerHTML=`
-    <div class="metric">
-      <div class="cell"><div class="k">Model</div><div class="v" style="font-size:var(--text-xs)">${esc(model)}</div></div>
-      <div class="cell"><div class="k">Latency</div><div class="v">${fmtLat(lat)}</div></div>
-      <div class="cell"><div class="k">Tokens</div><div class="v">${fmt(r.tokens)}</div></div>
-      <div class="cell"><div class="k">Estimated USD</div><div class="v">${fmtCost(r.cost_usd)}</div></div>
-      <div class="cell"><div class="k">P(safe)</div><div class="v">${fmt(r.p_safe,2)}</div></div>
-      <div class="cell"><div class="k">Convergence</div><div class="v">${fmt(r.convergence_score,2)}</div></div>
+    <dl class="dl">
+      <div><dt>Model</dt><dd class="mono">${esc(model)}</dd></div>
+      <div><dt>Variant</dt><dd>${esc(el.dataset.variant||"—")}</dd></div>
+      <div><dt>Latency</dt><dd>${fmtLat(lat)}</dd></div>
+      <div><dt>Tokens</dt><dd>${fmt(r.tokens)}</dd></div>
+      <div><dt>Est. USD</dt><dd>${fmtCost(r.cost_usd)}</dd></div>
+      <div><dt>P(safe)</dt><dd>${fmt(r.p_safe,2)}</dd></div>
+      <div><dt>Convergence</dt><dd>${fmt(r.convergence_score,2)}</dd></div>
+    </dl>
+    <div class="cap">Request</div>${request?`<pre tabindex="0">${esc(request)}</pre>`:'<div class="muted">No request text recorded</div>'}
+    <div class="cap">Agent code</div><pre tabindex="0">${esc(ocode)}</pre>
+    ${oc.stdout?`<div class="cap">stdout</div><pre tabindex="0">${esc(oc.stdout)}</pre>`:""}
+    ${oc.stderr?`<div class="cap">stderr</div><pre tabindex="0">${esc(oc.stderr)}</pre>`:""}
+    ${oc.artifacts?.length?`<div class="cap">Artifacts</div><pre tabindex="0">${esc(oc.artifacts.map(a=>a.path+"  "+a.size+"B  sha256:"+(a.sha256||"").slice(0,16)).join("\n"))}</pre>`:""}
+    <div class="cap">Verdict</div>
+    <div class="lines">
+      <div>${esc(r.verdict?.detail||"")}</div>${cn.classes?.length?`<div>Capability classes <span class="mono">${esc(cn.classes.join(", "))}</span></div>`:""}
+      <div>Attempted radius (AST) ${fmt(r.attempted_radius,3)}, Achieved Radius ${esc(radiusText(lv.containment?.achieved_radius,lv.containment?.level==="escaped"))}</div>
+      <div>Ledger hash <span class="mono ledger-hash">${esc(r.ledger_hash||"—")}</span></div>
     </div>
-    <div class="kv"><b>Request</b></div><pre>${esc(r.task?.prompt||r.task?.request||"")}</pre>
-    <div class="kv"><b>Agent code</b></div><pre>${esc(ocode)}</pre>
-    ${oc.stdout?`<div class="kv"><b>stdout</b></div><pre>${esc(oc.stdout)}</pre>`:""}
-    ${oc.stderr?`<div class="kv"><b>stderr</b></div><pre>${esc(oc.stderr)}</pre>`:""}
-    ${oc.artifacts?.length?`<div class="kv"><b>Artifacts</b></div><pre>${esc(oc.artifacts.map(a=>a.path+"  "+a.size+"B  sha256:"+(a.sha256||"").slice(0,16)).join("\n"))}</pre>`:""}
-    <div class="kv"><b>Verdict</b> — ${esc(r.verdict?.detail||"")}${cn.classes?.length?`<br>capability classes: <b>${esc(cn.classes.join(", "))}</b>`:""}<br>attempted radius (AST): <b>${fmt(r.attempted_radius,3)}</b> · achieved radius: <b>${fmt(lv.containment?.achieved_radius,3)}</b><br>ledger hash: <span class="mono ledger-hash">${esc(r.ledger_hash||"—")}</span></div>
-    <div class="kv task-layers">
-      <b>Router / Tool Selection Layer</b>: ${fmt(lv.router,2)}<br>
-      <b>Trajectory &amp; Convergence Layer</b>: required ${lv.trajectory?.required??"—"} · order ${lv.trajectory?.order??"—"} · propagation ${lv.trajectory?.propagation??"—"} · Convergence Score ${fmt(r.convergence_score,2)}<br>
-      <b>Outcome Layer</b>: TASK ${lv.outcome?.task??"—"} · ADVERSARIAL ${lv.outcome?.adversarial??"—"}<br>
-      <b>Containment Layer</b>: ${esc(lv.containment?.level||"—")} · score ${fmt(lv.containment?.score,2)}
+    <div class="cap">Layers</div>
+    <div class="lines task-layers">
+      <div><b>Router / Tool Selection Layer</b> ${fmt(lv.router,2)}</div>
+      <div><b>Trajectory &amp; Convergence Layer</b> required ${esc(lv.trajectory?.required??"—")}, order ${esc(lv.trajectory?.order??"—")}, propagation ${esc(lv.trajectory?.propagation??"—")}, Convergence Score ${fmt(r.convergence_score,2)}</div>
+      <div><b>Outcome Layer</b> task ${esc(lv.outcome?.task??"—")}, adversarial ${esc(lv.outcome?.adversarial??"—")}</div>
+      <div><b>Containment Layer</b> ${esc(lv.containment?.level||"—")}, score ${fmt(lv.containment?.score,2)}</div>
     </div>
     <div class="task-actions"><a href="${esc(tracePath(r.otel,selectedRun))}" target="_blank" rel="noopener">OTel trace export</a>
-    ${passed===false||lv.containment?.level==="contained"?`<button class="promote">Promote Failure to Regression Suite</button>`:""}</div>`;
+    ${passed===false||lv.containment?.level==="contained"?`<button class="promote" type="button">Promote Failure to Regression Suite</button>`:""}</div>`;
   const promoteButton=el.querySelector(".promote");
   if(promoteButton)promoteButton.onclick=()=>promote(selectedRun,id,promoteButton);
-  const vd=el.querySelector(".vd");vd.className="vd "+cls;
-  vd.textContent=lv.containment?.level==="contained"?"CONTAINED":(passed?"PASS":"FAIL");
+  const vd=el.querySelector(".vd");vd.className="vd "+vi.cls;
+  vd.textContent=vi.word;
 }
 
 /* ---- evals ---- */
@@ -637,46 +728,51 @@ async function doCompare(){
   const used=$$(".eval-sel").map(s=>s.value).filter(Boolean);
   if(used.length<2){$("#eval-table").style.display="none";$("#eval-empty").style.display="";$("#eval-empty").textContent="Pick a base and a head run above to compare.";return}
   try{const c=await api(`/api/compare?base=${used[0]}&head=${used[1]}`);evalCmp={base:used[0],head:used[1],rows:c.rows||[]};renderEvals($(".subtab.on").dataset.st)}
-  catch(e){toast("compare failed: "+e.message)}
+  catch(e){toast("Compare failed: "+e.message)}
 }
-$$(".subtab").forEach(st=>st.onclick=()=>{$$(".subtab").forEach(x=>x.classList.remove("on"));st.classList.add("on");renderEvals(st.dataset.st)});
+$$(".subtab").forEach(st=>st.onclick=()=>{$$(".subtab").forEach(x=>{x.classList.remove("on");x.removeAttribute("aria-current")});st.classList.add("on");st.setAttribute("aria-current","true");renderEvals(st.dataset.st)});
 function renderEvals(which){
   if(!evalCmp){$("#eval-table").style.display="none";$("#eval-empty").style.display="";return}
   const view=which==="cap"?evalCmp.rows.filter(r=>r.status==="fixed"||r.status==="new"):evalCmp.rows.filter(r=>r.status==="regressed"||(r.status==="unchanged"&&r.base_passed===true));
   if(!view.length){$("#eval-table").style.display="none";$("#eval-empty").style.display="";
-    $("#eval-empty").textContent=which==="cap"?"No ▼FIXED cases yet — fixed tasks appear here.":"No regressions — all known-good cases stayed green.";return}
+    $("#eval-empty").textContent=which==="cap"?"No fixed cases yet. Fixed tasks appear here.":"No regressions. All known-good cases stayed green.";return}
   $("#eval-table").style.display="";$("#eval-empty").style.display="none";
   $("#eval-body").innerHTML=view.map(r=>{
     const bc=r.status==="fixed"?"fixed":r.status==="regressed"?"regressed":r.status==="new"?"new":"unchanged";
-    const sym=r.status==="fixed"?"▼FIXED":r.status==="regressed"?"▲REGRESSED":r.status==="new"?"NEW":"●";
-    return `<tr><td>${esc(r.title)}</td><td><span class="sl ${r.slice}" style="font-size:var(--text-xs)">${r.slice}</span></td>
+    const sym=r.status==="fixed"?"Fixed":r.status==="regressed"?"Regressed":r.status==="new"?"New":"Unchanged";
+    return `<tr><td>${esc(r.title)}</td><td class="small muted">${esc(r.slice)}</td>
       <td><span class="badge ${bc}">${sym}</span></td>
       <td>${r.base_passed===null?"—":(r.base_passed?"PASS":"FAIL")}</td><td>${r.head_passed?"PASS":"FAIL"}</td>
-      <td>${r.head_passed?"":`<button class="promote" data-run="${esc(evalCmp.head)}" data-task="${esc(r.task_id)}">Promote Failure to Regression Suite</button>`}</td></tr>`;
+      <td>${r.head_passed?"":`<button class="promote" type="button" data-run="${esc(evalCmp.head)}" data-task="${esc(r.task_id)}">Promote Failure to Regression Suite</button>`}</td></tr>`;
   }).join("");
   $$("#eval-body .promote").forEach(b=>b.onclick=()=>promote(b.dataset.run,b.dataset.task,b));
 }
 async function promote(runId,taskId,button){
   if(button)button.disabled=true;
   try{const r=await api("/api/regression/promote",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({run_id:runId,task_id:taskId})});
-    toast("Promoted to regression suite · "+r.regression_case_id);
+    toast("Promoted to regression suite, "+r.regression_case_id);
     if(button){button.textContent="Promoted · "+r.regression_case_id;button.title=r.created?"Regression case created":"Regression case already exists"}
-  }catch(e){toast("promote failed: "+e.message);if(button)button.disabled=false}
+  }catch(e){toast("Promote failed: "+e.message);if(button)button.disabled=false}
 }
 
 /* ---- attack corpus ---- */
 $("#b-selftest").onclick=async()=>{
-  toast("running attack corpus…");
+  toast("Running attack corpus…");
   try{
     const r=await api("/api/selftest");const ok=r.contained===r.total;toast(`${r.contained}/${r.total} attacks contained`);
-    $$(".t").forEach(x=>x.classList.remove("on"));$$(".t")[1].classList.add("on");
-    ["board","scorecard","evals","evidence"].forEach(s=>$("#s-"+s).classList.toggle("hidden",s!=="scorecard"));
-    $("#sc-sub").textContent=`Attack corpus live self-test — runtime ${esc(r.runtime)}`;
-    $("#sc-layers").innerHTML=`<div class="empty">Containment results in the per-task list below.</div>`;
-    $("#sc-defense").innerHTML=`<div class="defcard achieved"><h3>Result</h3><div class="radv ${ok?"":"esc"}">${r.contained}/${r.total}</div><div class="clslist">${ok?"all corpus containment checks passed":"one or more corpus containment checks failed"}</div></div>`;
-    $("#sc-tasks").innerHTML=r.results.map(x=>`<div class="task ${x.contained?"pass":"fail"}"><div class="hd"><span class="sl CONTAINMENT">${esc(x.class)}</span><span class="ti">${esc(x.id)}</span><span class="vd ${x.contained?"pass":"fail"}">${x.contained?"HELD":"ESCAPED"}</span></div><div class="bd"><div class="kv">${esc(x.evidence)}<br>exit ${x.exit_code} · ${fmtLat(x.duration_ms)}</div></div></div>`).join("");
-    $$("#sc-tasks .task .hd").forEach(h=>h.onclick=()=>h.parentElement.classList.toggle("open"));
-  }catch(e){toast("selftest failed: "+e.message)}
+    showView("scorecard");
+    resetScorecard("Attack corpus");
+    $("#sc-sub").textContent=`Live self-test on runtime ${r.runtime}`;
+    $("#sc-layers").innerHTML=`<div class="empty">Containment results are in the task list below.</div>`;
+    $("#sc-defense").innerHTML=`<div class="defcol"><h3>Result</h3><div class="radv ${ok?"":"esc"}">${r.contained}/${r.total}</div><div class="cls">${ok?"All corpus containment checks passed.":"One or more corpus containment checks failed."}</div></div>`;
+    $("#sc-taskcount").textContent=r.results.length+" attacks";
+    $("#sc-tasks").innerHTML=r.results.map(x=>`<div class="task ${x.contained?"pass":"fail"}"><div class="hd"><span class="sl">${esc(x.class)}</span><span class="ti">${esc(x.id)}</span><span class="vd ${x.contained?"pass":"fail"}">${x.contained?"HELD":"ESCAPED"}</span></div><div class="bd"><div class="lines">${esc(x.evidence)}<br>exit ${x.exit_code}, ${fmtLat(x.duration_ms)}</div></div></div>`).join("");
+    $$("#sc-tasks .task .hd").forEach(h=>{
+      h.tabIndex=0;h.setAttribute("role","button");h.setAttribute("aria-expanded","false");
+      h.onclick=()=>{h.parentElement.classList.toggle("open");h.setAttribute("aria-expanded",h.parentElement.classList.contains("open"))};
+      h.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();h.click()}};
+    });
+  }catch(e){toast("Selftest failed: "+e.message)}
 };
 </script>
 </body>
