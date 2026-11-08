@@ -47,12 +47,15 @@ curl -s https://numbers-era-deeper-divorce.trycloudflare.com/api/health   # quic
 ssh root@66.135.13.202 systemctl show attest attest-cloudflared attest-demo-tunnel -p ActiveState,MainPID
 ```
 
+Full offline regression (selftest, piptest, apitest, hardeningtest, agenttest) passed with exit 0 on 2026-11-08 after this setup; deploy verification itself stays read-only GETs.
+
 ## Rollback (in order)
 
-1. DNS: delete only the `demo` CNAME record in zone attestgym.com.
-2. Tunnel: `DELETE /accounts/093e3649f8f043b3be54feb38d8aa62e/cfd_tunnel/3971afd8-e840-4467-85bc-a1732d3361f9`.
-3. Host: `systemctl disable --now attest-demo-tunnel` and remove the unit file and `/etc/attest/demo-tunnel.token`.
-The app itself never needs rollback for this change; it was not restarted.
+1. Delete the `demo` CNAME record in zone attestgym.com; hostname traffic drains.
+2. `systemctl disable --now attest-demo-tunnel` so the connector stops and the tunnel has zero active connections (the API refuses tunnel deletion while a connector is running).
+3. `DELETE /accounts/093e3649f8f043b3be54feb38d8aa62e/cfd_tunnel/3971afd8-e840-4467-85bc-a1732d3361f9`.
+4. Remove the unit file and `/etc/attest/demo-tunnel.token`, then `systemctl daemon-reload`.
+The app itself never needs rollback for this change; it was not restarted. Quick Tunnel (`attest-cloudflared.service`) stays as is.
 
 ## Troubleshooting
 

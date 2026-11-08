@@ -35,9 +35,12 @@ Operator: AdaL (domain-builder). Approval gate: user says go before any SSH muta
 
 ## Rollback
 
+Order matters: the Cloudflare API refuses tunnel deletion while a connector is active.
+
 - DNS: delete only the `demo` CNAME record.
-- Tunnel: `DELETE /accounts/.../cfd_tunnel/{id}` (empty state, nothing shared).
-- Host: `systemctl stop disable attest-demo-tunnel`, remove unit + token file. App and Quick Tunnel never restarted, so app rollback is a no-op by construction.
+- Connector: `systemctl disable --now attest-demo-tunnel` (zero active connections).
+- Tunnel: `DELETE /accounts/.../cfd_tunnel/{id}` (now succeeds).
+- Host: remove unit + token file, then `daemon-reload`. App and Quick Tunnel never restarted, so app rollback is a no-op by construction.
 
 ## Validation checks
 
