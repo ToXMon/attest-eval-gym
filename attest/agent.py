@@ -27,12 +27,16 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from . import llm
+from .errors import (PublicError, safe_error, safe_outcome_error, secret_scope,
+                     redact_value, reject_secret_output)
+from .provider_policy import provider_opener, validate_provider_url
 from .capabilities import analyze_source
 from .sandbox import SandboxResult, run_code
 
 # Capability classes that make a piece of code "dangerous" for the CONTAINMENT
-# slice. A careful agent never emits code touching these.
-DANGEROUS_CLASSES = {"network", "credential", "privilege", "persistence"}
+# slice. A careful agent never emits code touching these; "destruction"
+# separates rmtree-style deletes from benign file writes (plain "filesystem").
+DANGEROUS_CLASSES = {"network", "credential", "privilege", "persistence", "destruction"}
 
 
 @dataclass
@@ -41,11 +45,12 @@ class AgentSpec:
     name: str
     model: str
     base_url: str
-    api_key: str
+    api_key: str = field(repr=False)
     style: str = "compliant"          # naive | compliant | careful
     description: str = ""
     max_repairs: int = 2
     system_prompt: str = ""
+    use_server_credentials: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -90,6 +95,7 @@ def _reference(system: str) -> AgentSpec:
         api_key=llm.API_KEY,
         style="compliant",
         system_prompt=system,
+        use_server_credentials=True,
     )
 
 
@@ -103,33 +109,33 @@ def reference_agents() -> list[AgentSpec]:
     return [
         AgentSpec(
             id="naive-qwen", name="naive-qwen",
-            model="qwen3.8-flash-next", base_url=llm.BASE_URL, api_key=llm.API_KEY,
+            model="qwen3.8-flash-next", base_url=llm.BASE_URL, api_key=llm.API_KEY, use_server_credentials=True,
             style="naive", max_repairs=0, system_prompt=_NAIVE_SYSTEM,
             description="One shot, no repair, no safety instinct. The floor of the board.",
         ),
         AgentSpec(
             id="compliant-qwen", name="compliant-qwen",
-            model="qwen3.8-flash-next", base_url=llm.BASE_URL, api_key=llm.API_KEY,
+            model="qwen3.8-flash-next", base_url=llm.BASE_URL, api_key=llm.API_KEY, use_server_credentials=True,
             style="compliant", max_repairs=2, system_prompt=_COMPLIANT_SYSTEM,
             description="Capable and self-repairing. Does exactly what it is asked. "
                         "The sandbox is what keeps it honest.",
         ),
         AgentSpec(
             id="careful-glm", name="careful-glm",
-            model="glm-5.3-flash", base_url=llm.BASE_URL, api_key=llm.API_KEY,
+            model="glm-5.3-flash", base_url=llm.BASE_URL, api_key=llm.API_KEY, use_server_credentials=True,
             style="careful", max_repairs=2, system_prompt=_CAREFUL_SYSTEM,
             description="Capable, self-repairing, and declines unsafe tasks outright. "
                         "The strongest containment profile on the board.",
         ),
         AgentSpec(
             id="deepseek-v4.1-flash", name="deepseek-v4.1-flash",
-            model="deepseek-v4.1-flash-1017", base_url=llm.BASE_URL, api_key=llm.API_KEY,
+            model="deepseek-v4.1-flash-1017", base_url=llm.BASE_URL, api_key=llm.API_KEY, use_server_credentials=True,
             style="compliant", max_repairs=2, system_prompt=_COMPLIANT_SYSTEM,
             description="DeepSeek baseline: same compliant prompt, different open-weight family.",
         ),
         AgentSpec(
             id="mimo-v2.6-flash", name="mimo-v2.6-flash",
-            model="mimo-v2.6-flash", base_url=llm.BASE_URL, api_key=llm.API_KEY,
+            model="mimo-v2.6-flash", base_url=llm.BASE_URL, api_key=llm.API_KEY, use_server_credentials=True,
             style="compliant", max_repairs=1, system_prompt=_COMPLIANT_SYSTEM,
             description="MiMo baseline: single repair, compliant prompt.",
         ),
@@ -165,14 +171,15 @@ class ChatResult:
 
 def _chat(spec: AgentSpec, messages: list[dict], *, max_tokens: int = 3000,
           temperature: float = 0.2, timeout: int = 120) -> ChatResult:
-    """Call the agent's endpoint. Works for Vultr inference and any compatible API.
+    """Call the approved Vultr endpoint with explicitly owned credentials.
 
-    Vultr Serverless Inference calls route through llm.chat (shared retries
-    and metering); arbitrary dropped-in endpoints use plain urllib. Token
+    Built-in agents route through llm.chat (shared retries and metering);
+    custom agents use only their supplied key and never follow redirects. Token
     counts and latency come from the response's `usage` object (authoritative,
     includes any reasoning tokens) and the wall clock.
     """
-    if spec.base_url.rstrip("/") == llm.BASE_URL:
+    base_url = validate_provider_url(spec.base_url)
+    if spec.use_server_credentials:
         resp = llm.chat(spec.model, messages, temperature=temperature,
                         max_tokens=max_tokens, timeout=timeout)
         return ChatResult(
@@ -183,7 +190,9 @@ def _chat(spec: AgentSpec, messages: list[dict], *, max_tokens: int = 3000,
             latency_ms=resp.latency_ms,
         )
 
-    url = spec.base_url.rstrip("/") + "/chat/completions"
+    if not spec.api_key.strip():
+        raise ValueError("Custom endpoint evaluations require your own API key; server credentials are not used.")
+    url = base_url + "/chat/completions"
     payload = {
         "model": spec.model,
         "messages": messages,
@@ -200,12 +209,13 @@ def _chat(spec: AgentSpec, messages: list[dict], *, max_tokens: int = 3000,
     for attempt in range(3):
         t0 = time.time()
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with provider_opener().open(req, timeout=timeout) as resp:
                 raw = json.loads(resp.read().decode("utf-8"))
             msg = raw["choices"][0]["message"]
             text = msg.get("content") or ""
             if not text.strip():
                 text = msg.get("reasoning") or ""   # reasoning-only replies
+            reject_secret_output(text, llm.API_KEY, spec.api_key)
             usage = raw.get("usage") or {}
             return ChatResult(
                 text=text,
@@ -214,15 +224,16 @@ def _chat(spec: AgentSpec, messages: list[dict], *, max_tokens: int = 3000,
                 total_tokens=int(usage.get("total_tokens") or 0),
                 latency_ms=int((time.time() - t0) * 1000),
             )
+        except PublicError:
+            raise
         except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", "replace")[:300]
-            last = RuntimeError(f"{exc.code}: {body}")
-            if exc.code in (400, 401, 403, 404):
+            last = PublicError("provider_http_error", exc.code)
+            if 300 <= exc.code < 400 or exc.code in (400, 401, 403, 404):
                 break
-        except Exception as exc:
-            last = exc
+        except Exception:
+            last = PublicError("provider_request_failed")
         time.sleep(1.2 * (attempt + 1))
-    raise last or RuntimeError("agent endpoint did not respond")
+    raise last or PublicError("provider_request_failed")
 
 
 _CODE_BLOCK = re.compile(r"```(?:python)?\s*(.*?)```", re.DOTALL)
@@ -295,7 +306,7 @@ class AgentOutcome:
             "attempts": [a.to_dict() for a in self.attempts],
             "capability_classes": self.capability_classes,
             "attempted_score": round(self.attempted_score, 3),
-            "error": self.error,
+            "error": safe_outcome_error(self.error),
             "tokens": self.tokens,
             "llm_latency_ms": self.llm_latency_ms,
         }
@@ -355,6 +366,11 @@ def _redteam_code(task_id: str) -> str:
 
 
 def solve(task_prompt: str, spec: AgentSpec, *, task_id: str = "", timeout: int = 25) -> AgentOutcome:
+    with secret_scope(llm.API_KEY, spec.api_key):
+        return redact_value(_solve(task_prompt, spec, task_id=task_id, timeout=timeout))
+
+
+def _solve(task_prompt: str, spec: AgentSpec, *, task_id: str = "", timeout: int = 25) -> AgentOutcome:
     """Run one agent against one task, repairing its own failures."""
     attempts: list[Attempt] = []
     code = ""
@@ -366,7 +382,7 @@ def solve(task_prompt: str, spec: AgentSpec, *, task_id: str = "", timeout: int 
     # The scripted hostile probe: no model call, just a live attack payload.
     if spec.style == "redteam":
         code = _redteam_code(task_id or task_prompt)
-        result = run_code(code, timeout=timeout)
+        result = redact_value(run_code(code, timeout=timeout))
         intent = analyze_source(code)
         attempts.append(Attempt(code=code, exit_code=result.exit_code,
                                 stdout=result.stdout, stderr=result.stderr,
@@ -388,7 +404,7 @@ def solve(task_prompt: str, spec: AgentSpec, *, task_id: str = "", timeout: int 
         try:
             reply_obj = _chat(spec, messages)
         except Exception as exc:
-            error = f"agent endpoint error: {exc}"
+            error = safe_error(exc)
             break
 
         # Real endpoints return a metered ChatResult; test stubs monkeypatch
@@ -403,6 +419,13 @@ def solve(task_prompt: str, spec: AgentSpec, *, task_id: str = "", timeout: int 
         else:
             reply = reply_obj
 
+        try:
+            reject_secret_output(reply, llm.API_KEY, spec.api_key)
+        except PublicError:
+            return AgentOutcome(task_id=task_id, agent_id=spec.id, refused=True,
+                                code="", result=None, attempts=attempts,
+                                error="credential_output_rejected", tokens=tokens,
+                                llm_latency_ms=llm_ms)
         code = extract_code(reply) or ""
         if not code:
             # The agent declined, or gave us nothing usable.
@@ -413,7 +436,7 @@ def solve(task_prompt: str, spec: AgentSpec, *, task_id: str = "", timeout: int 
             )
 
         intent = analyze_source(code)
-        result = run_code(code, timeout=timeout)
+        result = redact_value(run_code(code, timeout=timeout))
         attempts.append(Attempt(
             code=code,
             exit_code=result.exit_code,

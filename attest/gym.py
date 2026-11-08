@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from . import llm
+from .errors import safe_error, secret_scope, redact_value
 from .agent import DANGEROUS_CLASSES, AgentOutcome, AgentSpec, Attempt, solve
 from .ledger import Ledger
 from .oracles import Grade, GradeContext, grade
@@ -140,9 +141,11 @@ class RunResult:
     model: str = ""
     total_tokens: int = 0
     total_cost_usd: float = 0.0
+    publication_schema: int = 0  # Only the completed redaction boundary may attest this.
 
     def to_dict(self, include_detail: bool = True) -> dict:
         d = {
+            "publication_schema": self.publication_schema,
             "run_id": self.run_id,
             "agent_id": self.agent_id,
             "agent_name": self.agent_name,
@@ -243,7 +246,19 @@ def _estimate_tokens(agent: AgentSpec, task: Task, outcome: AgentOutcome) -> int
     return prompt + replies
 
 
-def run_suite(
+def run_suite(agent, tasks=None, *, ledger=None, suite_source="seeded", on_event=_noop, timeout=25):
+    with secret_scope(llm.API_KEY, agent.api_key):
+        clean_agent = redact_value(agent)
+        clean_agent.api_key = agent.api_key
+        run = redact_value(_run_suite(
+            clean_agent, redact_value(tasks) if tasks else None, ledger=ledger,
+            suite_source=redact_value(suite_source),
+            on_event=lambda event: on_event(redact_value(event)), timeout=timeout))
+        run.publication_schema = 1
+        return run
+
+
+def _run_suite(
     agent: AgentSpec,
     tasks: list[Task] | None = None,
     *,
@@ -283,7 +298,12 @@ def run_suite(
     for i, task in enumerate(tasks):
         on_event({"type": "task_started", "run_id": run_id, "task": task.to_dict(), "index": i})
         t0 = time.time()
-        outcome = solve(task.prompt, agent, task_id=task.id, timeout=timeout)
+        try:
+            outcome = solve(task.prompt, agent, task_id=task.id, timeout=timeout)
+        except Exception as exc:
+            outcome = AgentOutcome(task_id=task.id, agent_id=agent.id, refused=False,
+                                   code="", result=None, error=safe_error(exc))
+        outcome = redact_value(outcome)
         solve_ms = int((time.time() - t0) * 1000)
         containment = assess_containment(outcome, canary)
 
@@ -311,11 +331,14 @@ def run_suite(
         estimated = not outcome.tokens
         cost = llm.estimate_cost_usd(agent.model, tokens)
         safety: dict = {}
-        if (llm.API_KEY and os.environ.get("ATTEST_SAFETY_ANNOTATE", "1") != "0"
+        if (agent.use_server_credentials and llm.API_KEY and os.environ.get("ATTEST_SAFETY_ANNOTATE", "1") != "0"
                 and outcome.code):
             # Non-verdict safety annotation (nemotron-3.5-content-safety).
             # Display only; the verdict below is 100% deterministic oracles.
             safety = llm.safety_annotate(outcome.code)
+        safety = redact_value(safety)
+        verdict = redact_value(verdict)
+        containment = redact_value(containment)
         tr = TaskResult(task=task, outcome=outcome, verdict=verdict, containment=containment,
                         latency_ms=solve_ms, tokens=tokens, tokens_estimated=estimated,
                         cost_usd=cost, safety=safety)
@@ -485,16 +508,10 @@ def _router_score(tr: TaskResult) -> float:
 
 
 def _p_safe(tr: TaskResult) -> float:
-    """Calibrated P(safe) -- display only, never a verdict.
+    """Non-billable display estimate from classifier evidence, never a verdict.
 
-    glm-5.3-flash calibrates when the inference key is present (ADR 0002;
-    cached by content hash); the deterministic mapping from the containment
-    ladder, discounted by the attempted radius, is the always-available
-    fallback."""
-    if llm.API_KEY and os.environ.get("ATTEST_PSAFE_LLM", "1") != "0" and tr.outcome.code:
-        p = llm.p_safe_calibrated(tr.task.prompt, tr.outcome.code)
-        if p is not None:
-            return round(p, 2)
+    Scorecard/OTel reads must not invoke inference or charge server credentials.
+    """
     level = (tr.containment or {}).get("outcome", "unknown")
     base = _P_SAFE_BASE.get(level, 0.5)
     p = base - 0.3 * (tr.outcome.attempted_score or 0.0)
@@ -799,11 +816,17 @@ def build_regression_case(run: RunResult, tr: TaskResult) -> dict:
 def run_from_dict(data: dict) -> RunResult | None:
     """Rebuild a RunResult from its persisted JSON (runs/*.json).
 
-    Best effort: anything that does not round-trip is skipped rather than
-    crashing the leaderboard on startup.
+    Fail closed: only the trusted writer's current publication schema is
+    accepted. Reject the entire record on task reconstruction failure; the
+    server preserves rejected originals in private quarantine.
     """
+    if (not isinstance(data, dict) or type(data.get("publication_schema")) is not int
+            or data["publication_schema"] != 1 or not isinstance(data.get("tasks"), list)
+            or not data["tasks"]):
+        return None
     try:
         run = RunResult(
+            publication_schema=1,
             run_id=data["run_id"], agent_id=data.get("agent_id", ""),
             agent_name=data.get("agent_name", ""), agent_style=data.get("agent_style", "compliant"),
             suite_version=data.get("suite_version", ""), suite_source=data.get("suite_source", "seeded"),
@@ -852,5 +875,5 @@ def run_from_dict(data: dict) -> RunResult | None:
                 safety=td.get("safety", {}),
             ))
         except Exception:
-            continue
+            return None
     return run

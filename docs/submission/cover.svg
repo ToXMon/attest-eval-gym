@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="t d">
+<title id="t">ATTEST: Score the work. Measure containment.</title>
+<desc id="d">Presentation cover with an abstract code artifact crossing into an amber sandbox and leaving a violet evidence trail. This is a conceptual illustration, not a screenshot or measured verdict.</desc>
+<defs>
+<linearGradient id="bg" x2="1" y2="1"><stop stop-color="#071321"/><stop offset="1" stop-color="#19213b"/></linearGradient>
+<radialGradient id="halo"><stop stop-color="#22d3ee" stop-opacity=".17"/><stop offset="1" stop-color="#22d3ee" stop-opacity="0"/></radialGradient>
+<pattern id="grid" width="64" height="64" patternUnits="userSpaceOnUse"><path d="M64 0H0V64" fill="none" stroke="#91b6cf" stroke-opacity=".07"/></pattern>
+<marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#fbbf68"/></marker>
+</defs>
+<rect width="1920" height="1080" fill="url(#bg)"/><rect width="1920" height="1080" fill="url(#grid)"/>
+<ellipse cx="1420" cy="480" rx="660" ry="600" fill="url(#halo)"/>
+<g font-family="Arial,Helvetica,sans-serif">
+<rect x="96" y="104" width="410" height="44" rx="22" fill="#123546" stroke="#3b9dad"/>
+<text x="122" y="133" fill="#78edf1" font-size="19" font-weight="700" letter-spacing="2">VULTR AGENT RUSH / TRACK 01</text>
+<text x="88" y="390" fill="#f4f8ff" font-size="164" font-weight="800" letter-spacing="-8">ATTEST</text>
+<text x="96" y="482" fill="#f4f8ff" font-size="56" font-weight="700">Score the work.</text>
+<text x="96" y="555" fill="#70e5ed" font-size="56" font-weight="700">Measure containment.</text>
+<text x="100" y="641" fill="#b6c9df" font-size="27">The Agent Eval &amp; Containment Gym</text>
+<text x="100" y="686" fill="#b6c9df" font-size="25">Deterministic graders. Hash-chained evidence.</text>
+<path d="M1030 478H1134" stroke="#fbbf68" stroke-width="4" marker-end="url(#arrow)"/>
+<rect x="930" y="320" width="180" height="126" rx="18" fill="#14283b" stroke="#5de4ed" stroke-width="2"/>
+<text x="966" y="401" fill="#5de4ed" font-size="54" font-family="monospace">&lt;/&gt;</text>
+<rect x="1150" y="260" width="650" height="476" rx="30" fill="#232822" stroke="#fbbf68" stroke-width="3" stroke-dasharray="14 8"/>
+<text x="1194" y="317" fill="#fbbf68" font-size="18" font-weight="700" letter-spacing="3">EXECUTION BOUNDARY</text>
+<text x="1194" y="382" fill="#f4f8ff" font-size="40" font-weight="700">Disposable sandbox</text>
+<path d="M1220 443H1570M1220 480H1480M1220 517H1610" stroke="#768c94" stroke-width="12" stroke-linecap="round" opacity=".55"/>
+<rect x="1194" y="580" width="250" height="58" rx="12" fill="#fbbf68"/><text x="1216" y="618" fill="#111a24" font-size="23" font-weight="700">Network isolated</text>
+<text x="1194" y="687" fill="#cbd5d8" font-size="23">Generated code runs here, not in the app.</text>
+<path d="M1630 738V798H1410" fill="none" stroke="#c4b5fd" stroke-width="4"/>
+<rect x="1210" y="775" width="400" height="104" rx="18" fill="#24213c" stroke="#c4b5fd" stroke-width="2"/>
+<text x="1240" y="819" fill="#e5dfff" font-size="26" font-weight="700">Inspect the evidence</text>
+<text x="1240" y="854" fill="#baafd9" font-size="21">Outcome + containment + ledger</text>
+<path d="M96 936H1824" stroke="#395066"/>
+<text x="100" y="989" fill="#b6c9df" font-size="21">Vultr Cloud Compute + Serverless Inference</text>
+<text x="1820" y="989" text-anchor="end" fill="#8198b1" font-size="18">Concept illustration • no measured verdict shown</text>
+</g></svg>

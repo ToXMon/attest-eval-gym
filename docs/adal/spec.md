@@ -4,7 +4,7 @@ Product: **ATTEST — The Agent Eval & Containment Gym.**
 Pitch: *"Drop your agent in. Get a failing task suite, a capability vs. regression board, and a public scorecard — including whether the sandbox had to save it."*
 
 ## User goal
-A judge opens the live URL, clicks an agent (or pastes an OpenAI-compatible endpoint), watches a 1-Click Fast Eval (4 tasks, ~20s) including a hostile `rm -rf /` / `/etc/shadow` probe get absorbed by the sandbox, and sees a new leaderboard row with real ledger evidence, cost, latency, convergence, and containment.
+A judge opens the public demo, selects a built-in agent or supplies their own key for the approved Vultr inference endpoint, and runs a 1-Click Fast Eval (4 tasks, including an `/etc/shadow` probe). The UI shows ledger evidence, estimated USD cost, latency, convergence, and observed containment results. The full attack corpus is a separate action; completion time is not guaranteed.
 
 ## Architecture (existing, proven)
 FastAPI control plane (`attest/server.py`) → Docker/gVisor sandbox (`attest/sandbox.py`, network=none, read-only, cap-drop ALL, uid 65534, wall-clock caps) → deterministic oracles (`attest/oracles.py`) → hash-chained SQLite ledger (`attest/ledger.py`) → single-page UI (`attest/web/index.html`).
@@ -23,6 +23,12 @@ FastAPI control plane (`attest/server.py`) → Docker/gVisor sandbox (`attest/sa
 }
 ```
 
+### Public endpoint policy
+
+Public custom evals accept only `https://api.vultrinference.com/v1` over HTTPS port 443, with a visitor-supplied `api_key`; they never fall back to server credentials. The optional `agent.endpoint` object contains `{base_url, model?, api_key, style?}`. Both frozen and legacy custom inputs enforce the same policy. Userinfo, alternate hosts or paths, query strings, fragments, and unexpected ports are rejected; provider redirects are disabled. Built-in model agents use Vultr inference. Arbitrary OpenAI-compatible destinations are out of scope unless a separately protected/authenticated mode is added.
+
+Provider failures expose stable error codes and optional HTTP status only, never provider response bodies or request headers. `/api/health` reports local configuration without an inference call.
+
 ### `/api` shapes
 - `POST /api/run` `{agent: {endpoint?, name}, tasks?: [ids]} → {run_id}`
 - `GET /api/run/{run_id}` → `{tasks: [{task_id, variant, layers: {router, trajectory: {required, order, propagation}, outcome: {task, adversarial}, containment: {level, score, achieved_radius}}, convergence_score, model, latency_ms, tokens, cost_usd, p_safe, ledger_hash, otel: "/api/run/{run_id}/otel.json"}]}`
@@ -34,11 +40,11 @@ FastAPI control plane (`attest/server.py`) → Docker/gVisor sandbox (`attest/sa
 Router/Tool Selection · Trajectory & Convergence (3 questions + Convergence Score) · Outcome (TASK, ADVERSARIAL — deterministic only) · Containment (ladder 1.0/1.0/0.5/0.0) · Attempted vs Achieved Radius side-by-side.
 
 ## UI requirements
-1. 1-Click Fast Eval button top of page + paste-endpoint input.
+1. 1-Click Fast Eval button top of page + approved Vultr endpoint input (visitor key required).
 2. Leaderboard with 6+ seeded agents on first paint (real ledger runs).
 3. Regression board tabs labeled **Capability Evals** / **Regression Evals**, badges ▼FIXED / ▲REGRESSED.
-4. Per-task card: model, latency, token count, USD cost, calibrated `P(safe)` (display only).
-5. Two-Layer Defense panel: static pre-flight vs kernel sandbox, and the no-secrets-in-container explanation.
+4. Per-task card: model, latency, token count, estimated USD cost, classifier-derived `P(safe)` estimate (display only).
+5. Two-Layer Defense panel: static pre-flight vs sandbox evidence. Host secrets are not passed as container environment variables; Achieved Radius is classifier-derived and does not prove isolation.
 
 ## Deployment
 Vultr `vc2-2c-4gb` Ubuntu 24.04 → Docker + gVisor → systemd uvicorn → Cloudflare Quick Tunnel public URL. Secrets in `.env` on VM only.

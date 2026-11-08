@@ -29,6 +29,9 @@ sys.path.insert(0, str(REPO))
 
 def _load_env() -> None:
     """Parse .env with sed (never source it) and export only what we need."""
+    import os
+    if os.environ.get("VULTR_INFERENCE_API_KEY"):
+        return
     env_file = REPO / ".env"
     if not env_file.exists():
         print("error: .env not found", file=sys.stderr)
@@ -55,8 +58,9 @@ from attest.sandbox import detect_runtime         # noqa: E402
 from attest.tasks import SEEDED_SUITE             # noqa: E402
 
 BUDGET_USD = 2.00
-RUNS_DIR = REPO / "runs"
-DB_PATH = REPO / "attest.db"
+import os
+RUNS_DIR = Path(os.environ.get("ATTEST_RUNS_DIR", str(REPO / "runs")))
+DB_PATH = Path(os.environ.get("ATTEST_DB", str(REPO / "attest.db")))
 
 
 def probe_catalogue() -> bool:
@@ -78,12 +82,22 @@ def main() -> int:
     ap.add_argument("--budget", type=float, default=BUDGET_USD)
     args = ap.parse_args()
 
+    import math
+    from attest import admission
+    if "VULTR_API_KEY" in os.environ:
+        print("error: compute key must not be present in seed process", file=sys.stderr)
+        return 1
+    if not math.isfinite(args.budget) or not 0 < args.budget <= BUDGET_USD:
+        print("error: seed budget must be positive and at most $2", file=sys.stderr)
+        return 1
+    admission.SPEND = admission.SpendBudget(args.budget, args.budget)
     print(f"runtime: {detect_runtime()}   ledger: {DB_PATH.name}   budget: ${args.budget:.2f}")
     if args.probe:
         return 0 if probe_catalogue() else 1
 
     if not probe_catalogue():
-        print("catalogue probe failed -- not spending money on a broken endpoint",
+        print(f"TOTAL ESTIMATED SPEND: ${llm.meter_cost_usd():.6f}; reserved ${admission.SPEND.total:.6f}")
+        print("catalogue probe failed -- stopping before baseline runs",
               file=sys.stderr)
         return 1
 
@@ -96,6 +110,15 @@ def main() -> int:
     for agent in agents:
         t0 = time.time()
         run = gym.run_suite(agent, list(SEEDED_SUITE), ledger=ledger, suite_source="seeded")
+        errors = [t.outcome.error for t in run.tasks
+                  if t.outcome.error and t.outcome.error != "agent declined to write code"]
+        if (errors or len(run.tasks) != len(SEEDED_SUITE) or not run.chain_valid
+                or not ledger.verify(run.run_id)
+                or any(t.containment.get("outcome") == "escaped" for t in run.tasks)
+                or (agent.use_server_credentials and not any(t.outcome.tokens for t in run.tasks))):
+            print(f"SEED FAILED: {agent.id}; task_count={len(run.tasks)}; errors={sorted(set(errors))}")
+            print(f"TOTAL ESTIMATED SPEND: ${llm.meter_cost_usd():.6f}; reserved ${admission.SPEND.total:.6f}")
+            return 1
         runs.append(run)
         (RUNS_DIR / f"{run.run_id}.json").write_text(json.dumps(run.to_dict(), indent=2))
         s = run.scores

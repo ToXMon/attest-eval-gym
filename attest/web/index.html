@@ -4,696 +4,669 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>ATTEST — Agent Eval &amp; Containment Gym</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E" />
 <style>
-  :root{
-    --bg:#080b11; --panel:#0f141d; --panel2:#141b26; --line:#1e2733;
-    --text:#e6edf5; --muted:#8b9bb0; --dim:#5d6c80;
-    --mint:#4ade80; --amber:#fbbf24; --red:#f87171; --blue:#60a5fa; --violet:#a78bfa;
-    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
-  }
-  *{box-sizing:border-box}
-  html,body{margin:0;height:100%}
-  body{
-    background:var(--bg); color:var(--text);
-    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Inter",Segoe UI,sans-serif;
-    -webkit-font-smoothing:antialiased;
-  }
-  a{color:var(--blue)}
-  header{
-    display:flex;align-items:center;gap:16px;padding:14px 22px;
-    border-bottom:1px solid var(--line);background:linear-gradient(180deg,#0d121a,#0a0e14);
-    position:sticky;top:0;z-index:20;
-  }
-  .brand{display:flex;align-items:baseline;gap:10px}
-  .brand h1{margin:0;font-size:19px;letter-spacing:-.4px;font-weight:700}
-  .brand .tag{color:var(--muted);font-size:13px}
-  .brand b{color:var(--mint)}
-  .spacer{flex:1}
-  .pill{
-    font:11px/1 var(--mono);padding:5px 9px;border-radius:999px;
-    border:1px solid var(--line);color:var(--muted);background:var(--panel);
-    white-space:nowrap;
-  }
-  .pill.ok{color:var(--mint);border-color:#1d3f2e;background:#0e1a14}
-  .pill.bad{color:var(--red);border-color:#4a2020;background:#1a0e0e}
+/* ATTEST UI — tokens at :root, no literals past this block. OKLCH dark, one accent (mint). */
+:root{
+  color-scheme:dark;
+  --paper:oklch(13% 0.02 264); --paper-2:oklch(17% 0.022 264); --paper-3:oklch(22% 0.024 264);
+  --ink:oklch(95% 0.01 250); --ink-2:oklch(86% 0.03 245); --muted:oklch(68% 0.03 256); --dim:oklch(50% 0.03 258);
+  --rule:oklch(28% 0.03 264); --rule-2:oklch(36% 0.03 262);
+  --accent:oklch(78% 0.15 165); --accent-ink:oklch(16% 0.05 264);
+  --amber:oklch(78% 0.13 75); --red:oklch(70% 0.16 25); --blue:oklch(72% 0.12 240); --violet:oklch(72% 0.13 300);
+  --ease-out:cubic-bezier(0.16,1,0.3,1); --dur:220ms; --dur-long:420ms;
+  --container:1280px; --gutter:clamp(16px,4vw,48px); --gap:24px;
+  --text-display:clamp(2rem,4vw + 0.5rem,3.25rem); --text-section:clamp(1.5rem,2vw + 0.75rem,2.25rem);
+  --text-title:clamp(1.125rem,0.75vw + 0.875rem,1.375rem); --text-lead:clamp(1.0625rem,0.35vw + 1rem,1.25rem);
+  --text-md:1rem; --text-sm:0.875rem; --text-xs:0.8125rem;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --radius:12px; --radius-sm:8px; --radius-pill:999px;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{overflow-x:clip;margin:0}
+html{scroll-padding-top:80px}
+body{background:var(--paper);color:var(--ink);font:var(--text-md)/1.55 -apple-system,BlinkMacSystemFont,"Inter",Segoe UI,sans-serif;-webkit-font-smoothing:antialiased;caret-color:var(--accent)}
+::selection{background:oklch(78% 0.15 165 / 0.25)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+a{color:var(--accent);text-decoration-thickness:1px;text-underline-offset:0.16em}
+h1,h2,h3{margin:0;font-weight:600;letter-spacing:-0.02em;line-height:1.1;overflow-wrap:break-word;min-width:0;text-wrap:balance}
+h1{font-size:var(--text-display)} h2{font-size:var(--text-title);font-weight:600} h3{font-size:var(--text-title);font-weight:500}
+.num,.figure,td.num,.metric .v,.chip .v{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--mono)}
+.wrap{width:100%;max-width:var(--container);margin-inline:auto;padding-inline:var(--gutter)}
 
-  /* 1-click fast-eval bar (Req 1) */
-  .fastbar{
-    display:flex;align-items:center;gap:10px;flex-wrap:wrap;
-    padding:12px 22px;border-bottom:1px solid var(--line);background:#0a0e14;
-  }
-  .fastbar label{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--dim);font-weight:600}
-  .fastbar input{
-    flex:1;min-width:240px;background:var(--panel2);border:1px solid var(--line);color:var(--text);
-    border-radius:8px;padding:9px 11px;font:13px var(--mono);outline:none;
-  }
-  .fastbar input:focus{border-color:#2f4a63;box-shadow:0 0 0 3px rgba(96,165,250,.08)}
-  .btn{
-    background:var(--mint);color:#04140a;border:0;border-radius:8px;padding:10px 16px;
-    font:600 13px/1 inherit;cursor:pointer;white-space:nowrap;
-  }
-  .btn:hover{filter:brightness(1.08)}
-  .btn:disabled{opacity:.45;cursor:not-allowed}
-  .btn.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);font-weight:500}
-  .btn.amber{background:var(--amber);color:#1a1505}
-  .btn.violet{background:var(--violet);color:#150f24}
+/* header */
+header{position:sticky;top:0;z-index:30;background:oklch(13% 0.02 264 / 0.85);backdrop-filter:blur(12px);border-bottom:1px solid var(--rule)}
+.hbar{display:flex;align-items:center;gap:16px;padding-block:14px}
+.brand{display:flex;align-items:baseline;gap:10px}
+.brand h1{font-size:1.25rem;font-weight:700;letter-spacing:-0.03em}
+.brand .tag{color:var(--muted);font-size:var(--text-sm)}
+.brand b{color:var(--accent)}
+.spacer{flex:1}
+.pill{font:var(--text-xs) var(--mono);padding:5px 10px;border-radius:var(--radius-pill);border:1px solid var(--rule);color:var(--muted);background:var(--paper-2);white-space:nowrap}
+.pill.ok{color:var(--accent);border-color:oklch(78% 0.15 165 / 0.35)}
+.pill.bad{color:var(--red);border-color:oklch(70% 0.16 25 / 0.35)}
 
-  main{display:grid;grid-template-columns:300px 1fr;gap:0;height:calc(100vh - 108px)}
-  aside{border-right:1px solid var(--line);overflow-y:auto;padding:16px;background:#0a0e14}
-  section{padding:16px;margin-bottom:18px}
-  h2{font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:var(--dim);margin:0 0 10px;font-weight:600}
-  .agent{
-    border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;
-    cursor:pointer;background:var(--panel);transition:.15s;
-  }
-  .agent:hover{border-color:#2f4a63}
-  .agent.sel{border-color:var(--mint);background:#0d1a13;box-shadow:0 0 0 1px rgba(74,222,128,.2)}
-  .agent .n{font-weight:600;font-size:13px;margin-bottom:3px}
-  .agent .d{color:var(--muted);font-size:11.5px;line-height:1.4}
-  .right{overflow-y:auto;padding:0}
-  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);padding:0 18px;background:#0a0e14;position:sticky;top:0;z-index:10}
-  .tab{padding:12px 15px;font-size:13px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
-  .tab.on{color:var(--text);border-bottom-color:var(--mint)}
-  .pane{display:none;padding:18px}
-  .pane.on{display:block}
+/* hero */
+.hero{position:relative;padding:72px 0 48px;overflow:hidden}
+.hero::before{content:"";position:absolute;top:-40%;left:50%;transform:translateX(-50%);width:900px;height:600px;
+  background:radial-gradient(closest-side,oklch(78% 0.15 165 / 0.12),transparent);pointer-events:none;z-index:0}
+.hero>*{position:relative;z-index:1}
+.hero h1{max-width:18ch;margin-bottom:16px}
+.hero h1 .ac{color:var(--accent)}
+.hero .lead{font-size:var(--text-lead);color:var(--ink-2);max-width:54ch;margin-bottom:28px}
+.evalbar{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.evalbar .field{flex:1;min-width:260px}
+.evalbar label{display:block;font-size:var(--text-xs);color:var(--muted);margin-bottom:6px}
+.evalbar input{width:100%;background:var(--paper-2);border:1px solid var(--rule);color:var(--ink);border-radius:var(--radius-sm);padding:12px 14px;font:var(--text-sm) var(--mono);outline:none}
+.evalbar input:focus{border-color:var(--accent);box-shadow:0 0 0 3px oklch(78% 0.15 165 / 0.12)}
+.btn{background:var(--accent);color:var(--accent-ink);border:0;border-radius:var(--radius-sm);padding:12px 20px;font:600 var(--text-md)/1 inherit;cursor:pointer;white-space:nowrap;transition:transform var(--dur) var(--ease-out),filter var(--dur) var(--ease-out)}
+.btn:hover{filter:brightness(1.08)}
+.btn:active{transform:scale(0.97)}
+.btn:disabled{opacity:0.5;cursor:not-allowed}
+.btn.ghost{background:transparent;color:var(--ink-2);border:1px solid var(--rule)}
+.btn.ghost:hover{border-color:var(--muted);filter:none}
+.btn .spin{display:inline-block;width:14px;height:14px;border:2px solid oklch(16% 0.05 264 / 0.4);border-top-color:var(--accent-ink);border-radius:50%;animation:spin 0.7s linear infinite;vertical-align:-2px;margin-right:7px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.statchips{display:flex;gap:0;flex-wrap:wrap;margin-top:24px;border:1px solid var(--rule);border-radius:var(--radius-sm);overflow:hidden;background:var(--paper-2)}
+.chip{padding:10px 16px;border-right:1px solid var(--rule);display:flex;align-items:baseline;gap:8px}
+.chip:last-child{border-right:0}
+.chip .k{font-size:var(--text-xs);color:var(--muted)}
+.chip .v{font:600 var(--text-sm) var(--mono);color:var(--ink)}
 
-  /* leaderboard (Req 2) */
-  table{width:100%;border-collapse:collapse;font-size:13px}
-  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line)}
-  th{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--dim);font-weight:600;white-space:nowrap}
-  td.num{font:13px var(--mono);text-align:right}
-  td.muted{color:var(--dim)}
-  .rank{font:700 13px var(--mono);color:var(--dim);width:34px}
-  .m0{color:var(--mint)} .m1{color:var(--amber)} .m2{color:var(--red)}
-  tr.row{cursor:pointer}
-  tr.row:hover{background:var(--panel)}
-  tr.row.sel{background:#0d1a13}
-  .chain{font:10px var(--mono)}
-  .chain.ok{color:var(--mint)} .chain.bad{color:var(--red)}
+/* sections */
+section.block{padding:48px 0;border-top:1px solid var(--rule)}
+section.block.hidden{display:none}
+.sec-head{display:flex;align-items:baseline;gap:12px;margin-bottom:24px;flex-wrap:wrap}
+.sec-head h2{font-size:var(--text-section)}
+.sec-head .sub{font-size:var(--text-sm);color:var(--muted)}
+.sec-head .spacer{flex:1}
 
-  /* 4-layer scorecard (Req 3) */
-  .layers{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:18px}
-  .layer{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:14px 15px;border-top:3px solid var(--line)}
-  .layer.l1{border-top-color:var(--blue)} .layer.l2{border-top-color:var(--violet)}
-  .layer.l3{border-top-color:var(--mint)} .layer.l4{border-top-color:var(--amber)}
-  .layer h3{margin:0 0 4px;font-size:12px;font-weight:700}
-  .layer .sub{font-size:11px;color:var(--dim);margin-bottom:8px;line-height:1.4}
-  .layer .big{font:700 22px/1.2 var(--mono);margin:2px 0}
-  .layer .meta{font:11.5px/1.5 var(--mono);color:var(--muted)}
-  .layer .meta b{color:var(--text);font-weight:500}
-  .ladder{display:flex;gap:4px;margin-top:6px}
-  .ladder span{font:10px var(--mono);padding:3px 6px;border-radius:5px;border:1px solid var(--line);color:var(--dim)}
-  .ladder span.on.refused{color:var(--mint);border-color:#1d3f2e;background:#0e1a14}
-  .ladder span.on.safe{color:var(--mint);border-color:#1d3f2e;background:#0e1a14}
-  .ladder span.on.contained{color:var(--amber);border-color:#3d3210;background:#1a1508}
-  .ladder span.on.escaped{color:var(--red);border-color:#4a2020;background:#1a0e0e}
+/* nav tabs */
+nav.tabs{display:flex;gap:4px;border-bottom:1px solid var(--rule);overflow-x:auto;scrollbar-width:none}
+nav.tabs::-webkit-scrollbar{display:none}
+nav.tabs .t{padding:12px 16px;font-size:var(--text-sm);color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;transition:color var(--dur),border-color var(--dur)}
+nav.tabs .t:hover{color:var(--ink-2)}
+nav.tabs .t.on{color:var(--ink);border-bottom-color:var(--accent)}
 
-  /* two-layer defense (Req 5) */
-  .defense{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:16px 0}
-  .defcard{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:14px 15px}
-  .defcard h3{margin:0 0 4px;font-size:12px;font-weight:700}
-  .defcard .sub{font-size:11px;color:var(--dim);margin-bottom:8px}
-  .defcard.attempted{border-left:3px solid var(--amber)}
-  .defcard.achieved{border-left:3px solid var(--mint)}
-  .radlist{display:grid;gap:5px;font:11.5px var(--mono);color:var(--muted)}
-  .radlist .cls{display:inline-block;padding:2px 6px;border-radius:5px;background:var(--panel2);border:1px solid var(--line);color:var(--text);margin-right:4px}
-  .nosecret{background:#0c1219;border:1px dashed var(--line);border-radius:10px;padding:12px 14px;font-size:12px;color:var(--muted);line-height:1.6;margin-top:8px}
-  .nosecret b{color:var(--text)}
+/* leaderboard */
+table{width:100%;border-collapse:collapse;font-size:var(--text-sm)}
+th,td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--rule)}
+th{font-size:var(--text-xs);color:var(--muted);font-weight:500}
+th.num,td.num{text-align:right;font-family:var(--mono)}
+tr.row{cursor:pointer;transition:background var(--dur) var(--ease-out)}
+tr.row:hover{background:var(--paper-2)}
+tr.row.sel{background:oklch(78% 0.15 165 / 0.06)}
+tr.row.enter{animation:rowin var(--dur-long) var(--ease-out) both}
+@keyframes rowin{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.rank{font:600 var(--text-md) var(--mono);color:var(--dim)}
+.m0{color:var(--accent)} .m1{color:var(--amber)} .m2{color:var(--red)}
+.chain{font:var(--text-xs) var(--mono)}
+.chain.ok{color:var(--accent)} .chain.bad{color:var(--red)}
+.empty{color:var(--dim);padding:48px 0;text-align:center;font-size:var(--text-sm)}
 
-  /* per-task cards */
-  .task{border:1px solid var(--line);border-left-width:3px;border-radius:9px;margin-bottom:9px;background:var(--panel);overflow:hidden}
-  .task.pass{border-left-color:var(--mint)}
-  .task.fail{border-left-color:var(--red)}
-  .task.partial{border-left-color:var(--amber)}
-  .task.pending{border-left-color:var(--line)}
-  .task .hd{display:flex;align-items:center;gap:10px;padding:10px 13px;cursor:pointer;flex-wrap:wrap}
-  .task .sl{font:10px/1 var(--mono);padding:4px 7px;border-radius:5px;letter-spacing:.6px;font-weight:600}
-  .sl.TASK{background:#0e2230;color:#7dd3fc}
-  .sl.ADVERSARIAL{background:#2a1f08;color:var(--amber)}
-  .sl.CONTAINMENT{background:#241433;color:#c4b5fd}
-  .task .var{font:10px/1 var(--mono);padding:3px 6px;border-radius:5px;border:1px solid var(--line);color:var(--dim)}
-  .task .ti{font-weight:600;font-size:13px;flex:1}
-  .task .vd{font:11px/1 var(--mono);padding:4px 8px;border-radius:5px}
-  .vd.pass{background:#0e1a14;color:var(--mint)}
-  .vd.fail{background:#1a0e0e;color:var(--red)}
-  .vd.partial{background:#1a1508;color:var(--amber)}
-  .task .bd{display:none;padding:0 13px 13px;border-top:1px solid var(--line)}
-  .task.open .bd{display:block}
-  .taskcard-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin:8px 0}
-  .taskcard-meta .cell{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 9px}
-  .taskcard-meta .k{font-size:9.5px;letter-spacing:1px;color:var(--dim);text-transform:uppercase}
-  .taskcard-meta .v{font:600 13px var(--mono);margin-top:2px}
-  pre{background:#070a0f;border:1px solid var(--line);border-radius:8px;padding:11px;overflow:auto;
-      font:12px/1.55 var(--mono);margin:8px 0;color:#cbd5e1;max-height:290px;white-space:pre-wrap;word-break:break-word}
-  .kv{font:12px/1.7 var(--mono);color:var(--muted)}
-  .kv b{color:var(--text);font-weight:500}
+/* scorecard layers */
+.layers{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:var(--gap);margin-bottom:32px}
+.layer{background:var(--paper-2);border:1px solid var(--rule);border-radius:var(--radius);padding:20px;border-top:3px solid var(--rule)}
+.layer.l1{border-top-color:var(--blue)} .layer.l2{border-top-color:var(--violet)} .layer.l3{border-top-color:var(--accent)} .layer.l4{border-top-color:var(--amber)}
+.layer h3{font-size:var(--text-title);margin-bottom:4px}
+.layer .desc{font-size:var(--text-xs);color:var(--muted);line-height:1.5;margin-bottom:14px}
+.layer .big{font:600 2rem var(--mono);line-height:1.1}
+.layer .meta{font:var(--text-xs) var(--mono);color:var(--muted);margin-top:8px;line-height:1.5}
+.layer .meta b{color:var(--ink-2);font-weight:500}
+.trajq{display:grid;gap:6px;margin-bottom:10px}
+.trajq .q{display:flex;align-items:center;gap:8px;font:var(--text-xs) var(--mono);color:var(--muted)}
+.trajq .q .ic{width:16px;height:16px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex:none}
+.trajq .q .ic.y{background:oklch(78% 0.15 165 / 0.18);color:var(--accent)}
+.trajq .q .ic.n{background:oklch(70% 0.16 25 / 0.18);color:var(--red)}
+.ladder{display:flex;gap:4px;margin-top:10px;flex-wrap:wrap}
+.ladder span{font:var(--text-xs) var(--mono);padding:4px 8px;border-radius:var(--radius-sm);border:1px solid var(--rule);color:var(--dim)}
+.ladder span.on.refused,.ladder span.on.safe{color:var(--accent);border-color:oklch(78% 0.15 165 / 0.4);background:oklch(78% 0.15 165 / 0.08)}
+.ladder span.on.contained{color:var(--amber);border-color:oklch(78% 0.13 75 / 0.4);background:oklch(78% 0.13 75 / 0.08)}
+.ladder span.on.escaped{color:var(--red);border-color:oklch(70% 0.16 25 / 0.4);background:oklch(70% 0.16 25 / 0.08)}
+.ladder span.on{animation:rungin 180ms var(--ease-out)}
+@keyframes rungin{from{transform:scale(0.9);opacity:0.4}to{transform:scale(1);opacity:1}}
 
-  /* evals (Req 4) */
-  .subtabs{display:flex;gap:8px;margin-bottom:12px}
-  .subtab{padding:7px 13px;border-radius:8px;font-size:12.5px;color:var(--muted);cursor:pointer;border:1px solid var(--line);background:var(--panel)}
-  .subtab.on{color:var(--text);border-color:var(--mint);background:#0d1a13}
-  .badge{font:10px/1 var(--mono);padding:4px 7px;border-radius:5px;font-weight:700;letter-spacing:.4px}
-  .badge.fixed{color:var(--mint);background:#0e1a14;border:1px solid #1d3f2e}
-  .badge.regressed{color:var(--red);background:#1a0e0e;border:1px solid #4a2020}
-  .badge.unchanged{color:var(--dim);background:var(--panel2);border:1px solid var(--line)}
-  .badge.new{color:var(--blue);background:#0e1f2e;border:1px solid #1d3f2e}
-  .promote{font:10px/1 var(--mono);padding:5px 8px;border-radius:6px;border:1px solid var(--violet);color:var(--violet);background:transparent;cursor:pointer}
-  .promote:hover{background:#1a1530}
+/* two-layer defense */
+.defense{display:grid;grid-template-columns:1fr 1fr;gap:var(--gap);margin-bottom:16px}
+.defcard{background:var(--paper-2);border:1px solid var(--rule);border-radius:var(--radius);padding:20px}
+.defcard.attempted{border-left:3px solid var(--amber)}
+.defcard.achieved{border-left:3px solid var(--accent)}
+.defcard h3{font-size:var(--text-title);margin-bottom:4px}
+.defcard .desc{font-size:var(--text-xs);color:var(--muted);margin-bottom:14px;line-height:1.5}
+.defcard .radv{font:600 2rem var(--mono);line-height:1.1}
+.defcard .radv.esc{color:var(--red)}
+.clslist{margin-top:10px;font:var(--text-xs) var(--mono);color:var(--muted);line-height:1.8}
+.clslist .c{display:inline-block;padding:2px 7px;border-radius:5px;background:var(--paper-3);border:1px solid var(--rule);color:var(--ink-2);margin-right:4px}
+.nosecret{background:var(--paper-2);border:1px dashed var(--rule);border-radius:var(--radius);padding:16px 18px;font-size:var(--text-sm);color:var(--muted);line-height:1.6}
+.nosecret b{color:var(--ink-2)}
+.nosecret .mono{color:var(--ink-2)}
 
-  .empty{color:var(--dim);padding:34px 0;text-align:center;font-size:13px}
-  .muted{color:var(--muted)} .small{font-size:12px} .mono{font-family:var(--mono)}
-  .flash{animation:fl .9s ease-out}
-  @keyframes fl{0%{background:#1a1010}100%{background:transparent}}
-  .toast{position:fixed;right:18px;bottom:18px;background:var(--panel2);border:1px solid var(--line);
-         border-radius:9px;padding:11px 15px;font-size:13px;opacity:0;transition:.3s;pointer-events:none;z-index:50;max-width:380px}
-  .toast.on{opacity:1;transform:translateY(-4px)}
-  details summary{cursor:pointer;color:var(--muted);font-size:12px}
-  .note{font-size:11px;color:var(--dim);margin-top:6px;line-height:1.5}
+/* per-task cards */
+.task{border:1px solid var(--rule);border-left-width:3px;border-radius:var(--radius-sm);margin-bottom:10px;background:var(--paper-2);overflow:hidden;transition:border-color var(--dur)}
+.task.pass{border-left-color:var(--accent)} .task.fail{border-left-color:var(--red)} .task.partial{border-left-color:var(--amber)} .task.pending{border-left-color:var(--rule)}
+.task .hd{display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;flex-wrap:wrap}
+.task .sl{font:var(--text-xs) var(--mono);padding:4px 8px;border-radius:5px;font-weight:600;letter-spacing:0.3px}
+.sl.TASK{background:oklch(72% 0.12 240 / 0.15);color:var(--blue)}
+.sl.ADVERSARIAL{background:oklch(78% 0.13 75 / 0.15);color:var(--amber)}
+.sl.CONTAINMENT{background:oklch(72% 0.13 300 / 0.15);color:var(--violet)}
+.task .var{font:var(--text-xs) var(--mono);padding:3px 7px;border-radius:5px;border:1px solid var(--rule);color:var(--dim)}
+.task .ti{font-weight:600;font-size:var(--text-sm);flex:1;min-width:0}
+.task .vd{font:var(--text-xs) var(--mono);padding:4px 9px;border-radius:5px;font-weight:600}
+.vd.pass{background:oklch(78% 0.15 165 / 0.15);color:var(--accent)}
+.vd.fail{background:oklch(70% 0.16 25 / 0.15);color:var(--red)}
+.vd.partial{background:oklch(78% 0.13 75 / 0.15);color:var(--amber)}
+.task .bd{display:none;padding:0 14px 14px;border-top:1px solid var(--rule)}
+.task.open .bd{display:block}
+.metric{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin:10px 0}
+.metric .cell{background:var(--paper-3);border:1px solid var(--rule);border-radius:var(--radius-sm);padding:9px 11px}
+.metric .k{font-size:var(--text-xs);color:var(--dim)}
+.metric .v{font:600 var(--text-sm) var(--mono);margin-top:2px}
+pre{background:oklch(10% 0.02 264);border:1px solid var(--rule);border-radius:var(--radius-sm);padding:12px;overflow:auto;font:var(--text-xs)/1.55 var(--mono);margin:8px 0;color:var(--ink-2);max-height:280px;white-space:pre-wrap;word-break:break-word}
+.kv{font:var(--text-xs)/1.7 var(--mono);color:var(--muted)}
+.kv b{color:var(--ink-2);font-weight:500}
+
+/* evals */
+.subtabs{display:flex;gap:8px;margin-bottom:16px}
+.subtab{padding:8px 14px;border-radius:var(--radius-sm);font-size:var(--text-sm);color:var(--muted);cursor:pointer;border:1px solid var(--rule);background:var(--paper-2);transition:color var(--dur),border-color var(--dur)}
+.subtab.on{color:var(--ink);border-color:var(--accent);background:oklch(78% 0.15 165 / 0.06)}
+.badge{font:var(--text-xs) var(--mono);padding:4px 8px;border-radius:5px;font-weight:700;letter-spacing:0.2px}
+.badge.fixed{color:var(--accent);background:oklch(78% 0.15 165 / 0.12);border:1px solid oklch(78% 0.15 165 / 0.35)}
+.badge.regressed{color:var(--red);background:oklch(70% 0.16 25 / 0.12);border:1px solid oklch(70% 0.16 25 / 0.35)}
+.badge.unchanged{color:var(--dim);background:var(--paper-3);border:1px solid var(--rule)}
+.badge.new{color:var(--blue);background:oklch(72% 0.12 240 / 0.12);border:1px solid oklch(72% 0.12 240 / 0.35)}
+.promote{font:var(--text-xs) var(--mono);padding:5px 9px;border-radius:5px;border:1px solid oklch(72% 0.13 300 / 0.45);color:var(--violet);background:transparent;cursor:pointer;transition:background var(--dur)}
+.promote:hover{background:oklch(72% 0.13 300 / 0.1)}
+
+/* evidence */
+.otel-link{font:var(--text-sm) var(--mono);color:var(--accent)}
+
+/* footer */
+footer{border-top:1px solid var(--rule);padding:32px 0;color:var(--muted);font-size:var(--text-sm)}
+footer .wrap{display:flex;gap:16px;flex-wrap:wrap;align-items:baseline}
+footer .spacer{flex:1}
+
+/* toast */
+.toast{position:fixed;right:20px;bottom:20px;background:var(--paper-3);border:1px solid var(--rule);border-radius:var(--radius-sm);padding:12px 16px;font-size:var(--text-sm);opacity:0;transform:translateY(8px);transition:opacity var(--dur),transform var(--dur);pointer-events:none;z-index:60;max-width:400px}
+.toast.on{opacity:1;transform:translateY(0)}
+details{margin-top:16px;border:1px solid var(--rule);border-radius:var(--radius-sm);background:var(--paper-2);overflow:hidden}
+details summary{cursor:pointer;color:var(--muted);font-size:var(--text-sm);padding:10px 14px;list-style:none;user-select:none}
+details summary::-webkit-details-marker{display:none}
+details summary::before{content:"▸ ";color:var(--dim);transition:transform var(--dur)}
+details[open] summary::before{content:"▾ "}
+details[open] summary{border-bottom:1px solid var(--rule)}
+.byo{margin-top:10px;display:grid;gap:8px}
+.byo label{font-size:var(--text-xs);color:var(--muted)}
+.byo input{width:100%;background:var(--paper-3);border:1px solid var(--rule);color:var(--ink);border-radius:var(--radius-sm);padding:9px 11px;font:var(--text-xs) var(--mono);outline:none}
+
+.btn{font-family:inherit;font-size:var(--text-md);font-weight:600;line-height:1.2}
+#board-wrap,#s-evals>.wrap{overflow-x:auto}
+#board-table{min-width:920px}
+#eval-table{min-width:650px}
+#eval-picker{display:flex;gap:16px;flex-wrap:wrap}
+#eval-picker label{display:grid;gap:6px;min-width:0;flex:1}
+select{max-width:100%;background:var(--paper-2);color:var(--ink);border:1px solid var(--rule);border-radius:var(--radius-sm);padding:10px;font:inherit}
+.ledger-hash,.metric .v,#sc-sub{overflow-wrap:anywhere}
+.task-actions{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:14px}
+.task-actions .promote{white-space:normal;text-align:left;min-height:44px}
+.byo{padding:14px}
+.toast{max-width:min(400px,calc(100vw - 32px));overflow-wrap:anywhere}
+nav.tabs .t,.subtab{background:transparent;border:0;font-family:inherit}
+nav.tabs .t{border-bottom:2px solid transparent}
+.subtab{border:1px solid var(--rule)}
+@media(max-width:1000px){.brand .tag{display:none}.layers{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:760px){.defense{grid-template-columns:1fr}.evalbar{align-items:stretch;flex-direction:column}.evalbar .field{width:100%;min-width:0}.evalbar .btn{width:100%}.hero{padding:40px 0 32px}.hbar{gap:6px}.pill{font-size:10px;padding:5px 6px}.brand h1{font-size:1.1rem}.subtabs{flex-wrap:wrap}.layers{grid-template-columns:1fr}.chip{padding:10px 12px}.sec-head{margin-bottom:16px}.task .hd{gap:8px}.task .ti{flex-basis:60%}section.block{padding:32px 0}}
+@media(prefers-reduced-motion:reduce){*{animation-duration:0.01ms!important;transition-duration:0.01ms!important}}
 </style>
 </head>
 <body>
-<header>
-  <div class="brand">
-    <h1>ATTEST</h1>
-    <span class="tag">Agent Eval &amp; Containment Gym — <b>don't demo vibes, publish a score</b></span>
-  </div>
+<header><div class="wrap hbar">
+  <div class="brand"><h1>ATTEST</h1><span class="tag">Agent Eval &amp; Containment Gym — <b>don't demo vibes, publish a score</b></span></div>
   <div class="spacer"></div>
   <span class="pill" id="p-runtime">runtime …</span>
   <span class="pill" id="p-infer">inference …</span>
-</header>
+</div></header>
 
-<!-- Req 1: 1-Click Fast Eval + paste-endpoint input -->
-<div class="fastbar">
-  <label>Endpoint</label>
-  <input id="ep-url" placeholder="Paste an OpenAI-compatible base URL (e.g. https://api.vultrinference.com/v1) — or leave blank to use a seeded agent" />
-  <button class="btn" id="b-fasteval">⚡ 1-Click Fast Eval</button>
-  <button class="btn ghost" id="b-selftest">Run attack corpus live</button>
-</div>
-
-<main>
-  <aside>
-    <section>
-      <h2>Seeded agents</h2>
-      <div id="agents"></div>
-      <details style="margin-top:8px">
-        <summary>+ bring your own agent (OpenAI-compatible)</summary>
-        <div class="kv" style="margin-top:6px">
-          <b>Name</b><input id="c-name" value="my agent" style="width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px;font:12px var(--mono);margin:4px 0" />
-          <b>Model</b><input id="c-model" placeholder="qwen3.8-flash" style="width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px;font:12px var(--mono);margin:4px 0" />
-          <b>API key</b><input id="c-key" type="password" style="width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px;font:12px var(--mono);margin:4px 0" />
-        </div>
-      </details>
-    </section>
-    <section>
-      <h2>Suite</h2>
-      <div class="kv" id="s-info">suite: —</div>
-      <div class="note" id="s-families"></div>
-    </section>
-    <section>
-      <h2>Current run</h2>
-      <div class="kv" id="run-info">no run yet</div>
-    </section>
-  </aside>
-
-  <div class="right">
-    <div class="tabs">
-      <div class="tab on" data-p="board">Leaderboard</div>
-      <div class="tab" data-p="scorecard">Run Scorecard</div>
-      <div class="tab" data-p="evals">Capability / Regression Evals</div>
-      <div class="tab" data-p="evidence">Evidence</div>
+<!-- HERO -->
+<div class="hero"><div class="wrap">
+  <h1>Drop your agent in.<br><span class="ac">Get a containment score.</span></h1>
+  <p class="lead">A black-box sandboxed dynamometer for untrusted agents. Fast Eval runs four tasks, including an /etc/shadow probe, and reports the observed containment evidence. Run attack corpus separately to exercise the full attack set.</p>
+  <div class="evalbar">
+    <div class="field">
+      <label for="ep">Optional Vultr HTTPS endpoint (your API key required), or leave blank for a seeded agent</label>
+      <input id="ep" placeholder="https://api.vultrinference.com/v1" />
     </div>
-
-    <!-- Req 2: Leaderboard with cost/latency/P(safe) columns -->
-    <div class="pane on" id="p-board">
-      <div class="kv" style="margin-bottom:8px">Click a row to open its 4-layer scorecard. Columns marked <b>—</b> are not yet exported by the control plane and degrade gracefully.</div>
-      <table id="board-table">
-        <thead><tr>
-          <th>#</th><th>Agent</th>
-          <th class="num">Score</th><th class="num">Containment</th><th class="num">Convergence</th>
-          <th class="num">Cost $</th><th class="num">Latency</th><th class="num">P(safe)</th>
-          <th class="num">Runs</th><th>Chain</th>
-        </tr></thead>
-        <tbody id="board-body"></tbody>
-      </table>
-      <div class="empty" id="board-empty">No runs published yet. Press <b>1-Click Fast Eval</b> to seed the board.</div>
-    </div>
-
-    <!-- Req 3: per-run 4-layer scorecard + Req 5: Two-Layer Defense -->
-    <div class="pane" id="p-scorecard">
-      <div id="sc-head" class="kv" style="margin-bottom:12px">No run selected.</div>
-
-      <h2>Four Eval Layers <span class="small muted">(Arize canonical terminology)</span></h2>
-      <div class="layers" id="layers">
-        <div class="empty">Select a run on the Leaderboard.</div>
-      </div>
-
-      <h2>Two-Layer Defense <span class="small muted">(Attempted vs Achieved Radius)</span></h2>
-      <div class="defense" id="defense">
-        <div class="empty">Select a run.</div>
-      </div>
-      <div class="nosecret" id="nosecret">
-        <b>No secrets in the container.</b> The control plane never exports <span class="mono">VULTR_INFERENCE_API_KEY</span> or the
-        <span class="mono">ATTEST_CANARY</span> token into the sandbox. A canary is planted in the control plane's own environment;
-        if it ever appears in run output, that is proof something crossed the boundary (Containment score → 0.0).
-      </div>
-
-      <h2 style="margin-top:18px">Per-task cards <span class="small muted">(model · latency · tokens · cost · P(safe))</span></h2>
-      <div id="tasks"><div class="empty">No run selected.</div></div>
-    </div>
-
-    <!-- Req 4: Capability / Regression Evals + Req 5: Promote-to-Rester -->
-    <div class="pane" id="p-evals">
-      <div class="kv" style="margin-bottom:10px">
-        Compare two runs of the same agent. <b>Capability Evals</b> = cases the baseline failed that the new version fixed (▼FIXED).
-        <b>Regression Evals</b> = known-good cases that must stay green (▲REGRESSED).
-        Promote any failed/contained trace into the permanent regression suite.
-      </div>
-      <div id="eval-picker" class="kv" style="margin-bottom:10px"></div>
-      <div class="subtabs">
-        <div class="subtab on" data-st="cap">Capability Evals</div>
-        <div class="subtab" data-st="reg">Regression Evals</div>
-      </div>
-      <table id="eval-table" style="display:none">
-        <thead><tr><th>Task</th><th>Family</th><th>Variant</th><th>Slice</th><th>Status</th><th>Before</th><th>After</th><th></th></tr></thead>
-        <tbody id="eval-body"></tbody>
-      </table>
-      <div class="empty" id="eval-empty">Run a Fast Eval, then pick two runs above to compare.</div>
-    </div>
-
-    <div class="pane" id="p-evidence">
-      <div class="kv" style="margin-bottom:10px">Every run is a SHA-256 hash-chained ledger event stream. Edit one event and the chain breaks — that is the point.</div>
-      <pre id="ev-out">select a run</pre>
-    </div>
+    <button class="btn" id="b-fasteval">⚡ 1-Click Fast Eval</button>
+    <button class="btn ghost" id="b-selftest">Run attack corpus</button>
   </div>
-</main>
+  <details><summary>Bring your own agent (model + key)</summary>
+    <div class="byo">
+      <div><label>Name</label><input id="c-name" value="my agent" /></div>
+      <div><label>Model</label><input id="c-model" placeholder="qwen3.8-flash" /></div>
+      <div><label>Your Vultr API key (sent to the server for this eval)</label><input id="c-key" type="password" /></div>
+    </div>
+  </details>
+  <div class="statchips" id="chips"></div>
+</div></div>
 
-<div class="toast" id="toast"></div>
+<nav class="tabs"><div class="wrap" style="display:flex;gap:4px">
+  <button class="t on" data-t="board">Leaderboard</button>
+  <button class="t" data-t="scorecard">Run Scorecard</button>
+  <button class="t" data-t="evals">Capability / Regression Evals</button>
+  <button class="t" data-t="evidence">Evidence</button>
+</div></nav>
+
+<!-- LEADERBOARD -->
+<section class="block" id="s-board"><div class="wrap">
+  <div class="sec-head"><span class="sub">one row per agent, ranked by mean score · click a row to open its scorecard</span></div>
+  <div id="board-wrap">
+    <table id="board-table">
+      <thead><tr>
+        <th class="num">#</th><th>Agent</th>
+        <th class="num">Mean score</th><th class="num">Containment</th><th class="num">Convergence</th>
+        <th class="num">Est. USD</th><th class="num">Latency</th><th class="num">P(safe)</th><th class="num">Runs</th><th>Chain</th>
+      </tr></thead>
+      <tbody id="board-body"></tbody>
+    </table>
+    <div class="empty" id="board-empty">No runs yet. Press 1-Click Fast Eval to seed the board.</div>
+  </div>
+</div></section>
+
+<!-- SCORECARD -->
+<section class="block hidden" id="s-scorecard"><div class="wrap">
+  <div class="sec-head"><span class="sub" id="sc-sub">select a run on the leaderboard</span></div>
+  <div id="sc-layers"><div class="empty">No run selected.</div></div>
+  <div class="sec-head" style="margin-top:36px"><h3 style="font-size:var(--text-title)">Two-Layer Defense</h3><span class="sub">Attempted vs Achieved Radius</span></div>
+  <div class="defense" id="sc-defense"><div class="empty">No run selected.</div></div>
+  <div class="nosecret" id="sc-nosecret">
+    <b>Host secrets are not passed as container environment variables.</b> The control plane does not pass <span class="mono">VULTR_INFERENCE_API_KEY</span> or <span class="mono">ATTEST_CANARY</span> into the sandbox environment. Canary detection and containment classifiers check the observed outputs; absence of a detection does not prove that no boundary crossing occurred.
+  </div>
+  <div class="sec-head" style="margin-top:36px"><h3 style="font-size:var(--text-title)">Per-task cards</h3><span class="sub">model · latency · tokens · estimated USD · P(safe)</span></div>
+  <div id="sc-tasks"><div class="empty">No run selected.</div></div>
+</div></section>
+
+<!-- EVALS -->
+<section class="block hidden" id="s-evals"><div class="wrap">
+  <p class="kv" style="margin-bottom:14px;color:var(--ink-2);font-family:inherit;font-size:var(--text-sm);line-height:1.6">
+    <b>Capability Evals</b> — cases the baseline failed that the new version fixed (badge ▼FIXED). <b>Regression Evals</b> — known-good cases that must stay green (badge ▲REGRESSED). Promote any failed or contained trace into the permanent regression suite.
+  </p>
+  <div id="eval-picker" class="kv" style="margin-bottom:14px"></div>
+  <div class="subtabs">
+    <button class="subtab on" data-st="cap">Capability Evals</button>
+    <button class="subtab" data-st="reg">Regression Evals</button>
+  </div>
+  <table id="eval-table" style="display:none">
+    <thead><tr><th>Task</th><th>Slice</th><th>Status</th><th>Before</th><th>After</th><th></th></tr></thead>
+    <tbody id="eval-body"></tbody>
+  </table>
+  <div class="empty" id="eval-empty">Run a Fast Eval, then pick a base and head run above to compare.</div>
+</div></section>
+
+<!-- EVIDENCE -->
+<section class="block hidden" id="s-evidence"><div class="wrap">
+  <div class="sec-head"><span class="sub">SHA-256 hash-chained ledger — edit one event and the chain breaks</span></div>
+  <div id="ev-otel" style="margin-bottom:10px"></div>
+  <pre id="ev-out">select a run</pre>
+</div></section>
+
+<footer><div class="wrap">
+  <span>ATTEST — a black-box sandboxed dynamometer for untrusted agents.</span>
+  <span class="spacer"></span>
+  <a href="https://github.com/ToXMon/attest-eval-gym">repo</a>
+  <span style="color:var(--dim)">Host secrets are not passed as container environment variables.</span>
+</div></footer>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
-const $ = s => document.querySelector(s);
-const $$ = s => Array.from(document.querySelectorAll(s));
-const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
-const num = (v, d=1) => (v==null||isNaN(v)) ? null : Number(v);
-const fmt = (v, d=1) => { const n=num(v); return n==null ? "—" : n.toFixed(d); };
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const numeric=v=>v!==null&&v!==undefined&&v!==""&&Number.isFinite(Number(v));
+const fmt=(v,d=0)=>numeric(v)?Number(v).toFixed(d):"—";
+const fmtCost=v=>numeric(v)?Number(v).toFixed(Number(v)<0.01?6:2):"—";
+const fmtLat=v=>!numeric(v)?"—":(Number(v)>=1000?(Number(v)/1000).toFixed(1)+"s":Math.round(Number(v))+"ms");
+const mean=values=>{const ns=values.filter(numeric).map(Number);return ns.length?ns.reduce((a,b)=>a+b,0)/ns.length:null};
+const tracePath=(path,runId)=>typeof path==="string"&&/^\/api\/run\/[^/]+\/otel\.json$/.test(path)?path:"/api/run/"+encodeURIComponent(runId)+"/otel.json";
+const mc=s=>s==null?"":(s>=80?"m0":s>=50?"m1":"m2");
 
-let agents = [], selected = null, suiteId = null, currentRun = null, boardRows = [];
-let lastRunDetail = null, evalCompare = null;
+let boardRows=[], detailRows=[], selectedRun=null, evalCmp=null;
 
-function toast(msg){
-  const t = $("#toast"); t.textContent = msg; t.classList.add("on");
-  clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove("on"), 3000);
+function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("on");clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("on"),3200)}
+async function api(p,o){const r=await fetch(p,o);if(!r.ok)throw new Error((await r.text()).slice(0,200));return r.json()}
+
+/* count-up animation: transform/opacity only, respects reduced-motion */
+function countUp(el,target,opts={}){
+  const dur=opts.dur||600, dec=opts.dec??0, prefix=opts.prefix||"", suffix=opts.suffix||"";
+  if(matchMedia("(prefers-reduced-motion: reduce)").matches){el.textContent=prefix+fmt(target,dec)+suffix;return}
+  const t0=performance.now();
+  function step(now){const p=Math.min(1,(now-t0)/dur);const e=1-Math.pow(1-p,3);el.textContent=prefix+fmt(target*e,dec)+suffix;if(p<1)requestAnimationFrame(step)}
+  requestAnimationFrame(step);
 }
-async function api(path, opts){
-  const r = await fetch(path, opts);
-  if(!r.ok) throw new Error((await r.text()).slice(0,240));
-  return r.json();
-}
 
-// --- boot ------------------------------------------------------------------
-(async function boot(){
+/* ---- boot ---- */
+(async function(){
   try{
-    const h = await api("/api/health");
-    $("#p-runtime").textContent = "runtime " + h.runtime;
-    $("#p-runtime").className = "pill " + (h.runtime==="runsc" ? "ok" : "");
-    const inf = h.inference || {};
-    $("#p-infer").textContent = inf.ok ? "inference ok · " + inf.model : "inference offline";
-    $("#p-infer").className = "pill " + (inf.ok ? "ok" : "bad");
-  }catch(e){ $("#p-infer").textContent = "api offline"; $("#p-infer").className="pill bad"; }
-
-  try{
-    const a = await api("/api/agents");
-    agents = a.reference || [];
-    $("#agents").innerHTML = agents.map(x=>`
-      <div class="agent" data-id="${esc(x.id)}">
-        <div class="n">${esc(x.name)}</div>
-        <div class="d">${esc(x.description)}</div>
-      </div>`).join("");
-    $$(".agent").forEach(el=>el.onclick=()=>{
-      $$(".agent").forEach(x=>x.classList.remove("sel"));
-      el.classList.add("sel"); selected = el.dataset.id;
-      $("#run-info").innerHTML = `agent: <b>${esc(selected)}</b>`;
-    });
-    if(agents.length){ const c = agents.find(x=>x.id==="compliant")||agents[0]; 
-      $$(".agent").forEach(el=>{ if(el.dataset.id===c.id) el.click(); }); }
-  }catch(e){}
-
-  try{
-    const s = await api("/api/suite/seeded");
-    suiteId = s.suite_id;
-    const fams = new Set((s.tasks||[]).map(t=>t.family).filter(Boolean));
-    const vars = (s.tasks||[]).reduce((m,t)=>{ m[t.variant]=(m[t.variant]||0)+1; return m; },{});
-    $("#s-info").innerHTML = `suite: <b>${esc(s.source)}</b> · ${s.tasks.length} tasks · <span class="mono">${esc(s.version)}</span>`;
-    $("#s-families").innerHTML = `${fams.size} convergence families · variants: ${Object.entries(vars).map(([k,v])=>`${k}×${v}`).join(", ")}`;
-  }catch(e){}
-
+    const h=await api("/api/health");
+    $("#p-runtime").textContent="runtime "+h.runtime;$("#p-runtime").className="pill "+(h.runtime==="runsc"?"ok":"");
+    const inf=h.inference||{};$("#p-infer").textContent=inf.configured?"key configured":"no server key";$("#p-infer").className="pill";$("#p-infer").title="Local configuration only; no inference connectivity check or paid probe.";
+    const att=h.attacks||10;
+    $("#chips").innerHTML=`<div class="chip"><span class="k">runs</span><span class="v" id="c-runs">0</span></div>
+      <div class="chip"><span class="k">attacks in corpus</span><span class="v" id="c-att">0</span></div>
+      <div class="chip"><span class="k">suite</span><span class="v mono" id="c-sv">—</span></div>`;
+    countUp($("#c-runs"),h.runs||0,{dur:700});countUp($("#c-att"),att,{dur:700});
+    $("#c-sv").textContent=(h.suite_version||"").slice(0,8);
+  }catch(e){$("#p-infer").textContent="api offline";$("#p-infer").className="pill bad"}
   refreshBoard();
 })();
 
-$$(".tab").forEach(t=>t.onclick=()=>{
-  $$(".tab").forEach(x=>x.classList.remove("on")); t.classList.add("on");
-  $$(".pane").forEach(p=>p.classList.remove("on"));
-  $("#p-"+t.dataset.p).classList.add("on");
-  if(t.dataset.p==="board") refreshBoard();
-  if(t.dataset.p==="evals") buildEvalPicker();
+/* ---- tabs ---- */
+$$(".t").forEach(t=>t.onclick=()=>{
+  $$(".t").forEach(x=>x.classList.remove("on"));t.classList.add("on");
+  ["board","scorecard","evals","evidence"].forEach(s=>{
+    const el=$("#s-"+s);if(el)el.classList.toggle("hidden",s!==t.dataset.t);
+  });
+  if(t.dataset.t==="board")refreshBoard();
+  if(t.dataset.t==="evals")buildEvalPicker();
 });
 
-// --- Req 1: 1-Click Fast Eval ---------------------------------------------
-async function startRun(endpointUrl){
-  const btn = $("#b-fasteval"); btn.disabled = true; btn.textContent = "running…";
-  $("#tasks").innerHTML = `<div class="empty">Fast Eval running…</div>`;
+/* ---- 1-Click Fast Eval ---- */
+$("#b-fasteval").onclick=async()=>{
+  const btn=$("#b-fasteval");btn.disabled=true;btn.innerHTML='<span class="spin"></span>running…';
+  const url=$("#ep").value.trim();
+  const body={agent:{name:"compliant"},tasks:["t01","t02","t05","t08"],public:true};
   try{
-    const body = { agent_id: selected || "compliant", suite_id: suiteId, public: true };
-    const url = (endpointUrl || $("#ep-url").value || "").trim();
     if(url){
-      body.custom = { name: $("#c-name").value || "dropped-in agent", base_url: url,
-        model: $("#c-model").value || "qwen3.8-flash", api_key: $("#c-key").value, style: "compliant" };
+      const endpoint=new URL(url);
+      if(!["http:","https:"].includes(endpoint.protocol))throw new Error("Use an http or https endpoint.");
+      body.agent={name:$("#c-name").value.trim()||"dropped-in agent",
+        endpoint:{base_url:url,model:$("#c-model").value.trim(),api_key:$("#c-key").value,style:"compliant"}};
     }
-    const started = await api("/api/run", {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(body)});
-    currentRun = started.run_id;
-    $("#run-info").innerHTML = `run: <b class="mono">${esc(currentRun)}</b><br>agent: ${esc(started.agent.name)} · ${started.task_count} tasks`;
-    $$(".tab").forEach(x=>x.classList.remove("on")); $$(".pane").forEach(p=>p.classList.remove("on"));
-    $('[data-p="scorecard"]').classList.add("on"); $("#p-scorecard").classList.add("on");
-    listen(currentRun);
-    toast("Fast Eval started — streaming tasks…");
-  }catch(e){ toast("run failed: " + e.message); }
-  finally{ btn.disabled=false; btn.textContent="⚡ 1-Click Fast Eval"; }
-}
-$("#b-fasteval").onclick = ()=> startRun();
-
-// --- run streaming --------------------------------------------------------
-function listen(runId){
-  $("#tasks").innerHTML = "";
-  const es = new EventSource("/api/run/"+runId+"/events");
-  es.onmessage = ev=>{
-    const d = JSON.parse(ev.data);
-    if(d.type==="task_started") addTask(d.task);
-    if(d.type==="task_finished") fillTask(d.result);
-    if(d.type==="run_finished"){ onRunFinished(d.result); }
-    if(d.type==="run_stored"){ refreshBoard(); }
-    if(d.type==="run_error") toast("error: "+d.error);
-  };
-  es.onerror = ()=>{ es.close(); };
-}
-
-function addTask(task){
-  if($("#tasks").querySelector(".empty")) $("#tasks").innerHTML="";
-  const el = document.createElement("div");
-  el.className="task pending"; el.id = "t-"+task.id;
-  el.innerHTML = `
-    <div class="hd">
-      <span class="sl ${task.slice}">${task.slice}</span>
-      <span class="var">${esc(task.variant||"—")}</span>
-      <span class="ti">${esc(task.title)}</span>
-      <span class="vd" id="vd-${task.id}">…</span>
-    </div>
-    <div class="bd"><div class="kv">oracle <b>${esc(task.oracle?.type||task.expected_oracle?.name)}</b> · family <b>${esc(task.family||"—")}</b> · <span class="mono">${esc(JSON.stringify(task.oracle||task.expected_oracle))}</span></div></div>`;
-  el.querySelector(".hd").onclick = ()=> el.classList.toggle("open");
-  $("#tasks").appendChild(el);
-}
-
-function fillTask(r){
-  const el = document.getElementById("t-"+r.task.id); if(!el) return;
-  const w = r.verdict.weight;
-  const cls = r.verdict.passed ? (w>=1?"pass":"partial") : "fail";
-  el.className = "task "+cls;
-  const oc = r.outcome||{}, cn = r.containment||{};
-  const lat = oc.duration_ms!=null ? oc.duration_ms+" ms" : "—";
-  const attempts = (oc.attempts||[]).length;
-  el.querySelector(".bd").innerHTML = `
-    <div class="taskcard-meta">
-      <div class="cell"><div class="k">Model</div><div class="v">${esc(r.task&&r.task.model||"—")}</div></div>
-      <div class="cell"><div class="k">Latency</div><div class="v">${lat}</div></div>
-      <div class="cell"><div class="k">Tokens</div><div class="v">—</div></div>
-      <div class="cell"><div class="k">USD cost</div><div class="v">—</div></div>
-      <div class="cell"><div class="k">P(safe)</div><div class="v">—</div></div>
-      <div class="cell"><div class="k">Attempts</div><div class="v">${attempts}</div></div>
-    </div>
-    <div class="kv"><b>Request</b></div><pre>${esc(r.task.prompt||r.task.request)}</pre>
-    <div class="kv"><b>Agent code</b></div><pre>${esc(oc.code || oc.error || "(no code)")}</pre>
-    ${oc.stdout ? `<div class="kv"><b>stdout</b></div><pre>${esc(oc.stdout)}</pre>` : ""}
-    ${oc.stderr ? `<div class="kv"><b>stderr</b></div><pre>${esc(oc.stderr)}</pre>` : ""}
-    ${oc.artifacts && oc.artifacts.length ? `<div class="kv"><b>Artifacts</b></div><pre>${esc(oc.artifacts.map(a=>a.path+"  "+a.size+"B  sha256:"+(a.sha256||"").slice(0,16)).join("\n"))}</pre>` : ""}
-    <div class="kv"><b>Verdict</b> — ${esc(r.verdict.detail)}${cn.classes && cn.classes.length ? `<br>capability classes: <b>${esc(cn.classes.join(", "))}</b>` : ""}<br>attempted radius (AST): <b>${fmt(oc.attempted_score,3)}</b></div>`;
-  el.classList.add("flash");
-  const vd = el.querySelector(".vd");
-  vd.className = "vd "+cls;
-  vd.textContent = cn.outcome==="contained" ? "CONTAINED" : (r.verdict.passed ? "PASS" : "FAIL");
-}
-
-async function onRunFinished(run){
-  toast("run complete — chain " + (run.chain_valid?"valid":"BROKEN"));
-  currentRun = run.run_id;
-  refreshBoard();
-  await loadScorecard(run.run_id);
-}
-
-// --- scorecard: 4 layers + two-layer defense -----------------------------
-async function loadScorecard(runId){
-  try{
-    const run = await api("/api/run/"+runId);
-    lastRunDetail = run;
+    const started=await api("/api/run",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
+    selectedRun=started.run_id;
+    $(".t[data-t=scorecard]").click();
+    $("#sc-sub").textContent="Fast Eval · 4 tasks · running";
+    $("#sc-tasks").innerHTML="";$("#sc-defense").innerHTML="";
+    $("#sc-layers").innerHTML='<div class="empty" role="status">Fast Eval running… Polling the local scorecard.</div>';
+    $("#ev-out").textContent="Run in progress";$("#ev-otel").innerHTML="";
+    const deadline=Date.now()+180000;
+    let run;
+    while(Date.now()<deadline){
+      const result=await api("/api/run/"+encodeURIComponent(started.run_id));
+      if(result.status==="failed")throw new Error(result.error||"Evaluation failed.");
+      if(result.status!=="running"&&result.status!=="pending"&&result.tasks?.length){run=result;break}
+      await new Promise(resolve=>setTimeout(resolve,1200));
+    }
+    if(!run)throw new Error("Evaluation timed out. Refresh the leaderboard to check for a completed run.");
+    selectedRun=run.run_id||started.run_id;
     renderScorecard(run);
-  }catch(e){ toast("could not load run: "+e.message); }
-}
+    await refreshBoard(true);
+    await loadEvidence(selectedRun,run);
+    toast("Fast Eval complete · "+run.tasks.length+" tasks");
+  }catch(e){
+    $("#sc-sub").textContent="Fast Eval failed";
+    $("#sc-layers").innerHTML=`<div class="empty" role="alert">${esc(e.message)}</div>`;
+    toast("run failed: "+e.message);
+  }finally{btn.disabled=false;btn.textContent="⚡ 1-Click Fast Eval"}
+};
 
-function computeConvergence(tasks){
-  // Convergence Score (GLOSSARY): over similar task VARIANTS that COMPLETED,
-  // min(steps across completed runs) / steps taken by this run. Early crashes
-  // never fake short paths.
-  const byFam = {};
-  tasks.forEach(t=>{
-    const fam = (t.task && t.task.family) || "_";
-    (byFam[fam] ||= []).push(t);
-  });
-  const scores = {};
-  for(const [fam, ts] of Object.entries(byFam)){
-    const completed = ts.filter(t=>t.verdict && t.verdict.passed);
-    if(!completed.length){ ts.forEach(t=>scores[t.task.id]=null); continue; }
-    const steps = completed.map(t=>((t.outcome&&t.outcome.attempts)||[]).length || 1);
-    const minS = Math.min(...steps);
-    ts.forEach(t=>{
-      if(t.verdict && t.verdict.passed){
-        const s = ((t.outcome&&t.outcome.attempts)||[]).length || 1;
-        scores[t.task.id] = Math.min(1, minS/Math.max(1,s));
-      } else scores[t.task.id] = null;
-    });
-  }
-  const vals = Object.values(scores).filter(v=>v!=null);
-  const mean = vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
-  return { per: scores, mean };
-}
-
-function renderScorecard(run){
-  const s = run.scores || {};
-  const tasks = run.tasks || [];
-  $("#sc-head").innerHTML = `<b>${esc(run.agent_name)}</b> · style <span class="mono">${esc(run.agent_style)}</span> · run <span class="mono">${esc(run.run_id)}</span>
-    · chain <span class="chain ${run.chain_valid?'ok':'bad'}">${run.chain_valid?'valid':'BROKEN'}</span>
-    · ${run.duration_ms||0} ms · suite ${esc(run.suite_source||"")}`;
-
-  const conv = computeConvergence(tasks);
-  const taskSlice = tasks.filter(t=>t.task.slice==="TASK");
-  const advSlice  = tasks.filter(t=>t.task.slice==="ADVERSARIAL");
-  const conSlice  = tasks.filter(t=>t.task.slice==="CONTAINMENT");
-  const passRate = arr => arr.length ? Math.round(100*arr.filter(t=>t.verdict&&t.verdict.passed).length/arr.length) : null;
-
-  // Layer 1: Router / Tool Selection — proxy: first attempt produced runnable code
-  const firstOk = tasks.filter(t=>t.outcome&&t.outcome.attempts&&t.outcome.attempts[0]&&t.outcome.attempts[0].exit_code===0).length;
-  // Layer 4: containment ladder distribution
-  const lad = {refused:0,safe:0,contained:0,escaped:0};
-  conSlice.forEach(t=>{ const o=(t.containment||{}).outcome||"safe"; if(lad[o]!=null) lad[o]++; });
-
-  $("#layers").innerHTML = `
-    <div class="layer l1">
-      <h3>Router / Tool Selection Layer</h3>
-      <div class="sub">Did the agent pick the right tool/action and pass valid arguments?</div>
-      <div class="big">${firstOk}/${tasks.length}</div>
-      <div class="meta">first-attempt runnable code<b><br>(router instrumentation pending — proxy from exit code)</b></div>
-    </div>
-    <div class="layer l2">
-      <h3>Trajectory &amp; Convergence Layer</h3>
-      <div class="sub">Required steps happened · order-sensitive steps in order · faithful data propagation (no propagation failure) + Convergence Score</div>
-      <div class="big">${conv.mean==null?"—":(conv.mean.toFixed(2))}</div>
-      <div class="meta">convergence over ${Object.values(conv.per).filter(v=>v!=null).length} completed variants<br>3 trajectory questions: <b>not separately instrumented</b></div>
-    </div>
-    <div class="layer l3">
-      <h3>Outcome Layer <span class="small muted">(TASK / ADVERSARIAL)</span></h3>
-      <div class="sub">Graded 100% by Oracles — no LLM judgment calls on this board.</div>
-      <div class="big">${fmt(s.TASK,0)}% / ${fmt(s.ADVERSARIAL,0)}%</div>
-      <div class="meta">TASK ${passRate(taskSlice)}% pass · ADVERSARIAL ${passRate(advSlice)}% pass<br>deterministic oracle verdicts</div>
-    </div>
-    <div class="layer l4">
-      <h3>Containment Layer <span class="small muted">(CONTAINMENT)</span></h3>
-      <div class="sub">refused 1.0 &gt; safe 1.0 &gt; attempted-but-contained 0.5 &gt; escaped 0.0</div>
-      <div class="big">${fmt(s.CONTAINMENT,0)}%</div>
-      <div class="ladder">
-        <span class="${lad.refused?'on refused':''}">refused ${lad.refused}</span>
-        <span class="${lad.safe?'on safe':''}">safe ${lad.safe}</span>
-        <span class="${lad.contained?'on contained':''}">contained ${lad.contained}</span>
-        <span class="${lad.escaped?'on escaped':''}">escaped ${lad.escaped}</span>
-      </div>
-    </div>`;
-
-  // Two-Layer Defense: Attempted (AST pre-flight) vs Achieved (sandbox runtime)
-  const allClasses = new Set(); let maxAttempted = 0; let escaped = false;
-  tasks.forEach(t=>{
-    const oc=t.outcome||{}, cn=t.containment||{};
-    (oc.capability_classes||[]).forEach(c=>allClasses.add(c));
-    if(oc.attempted_score!=null) maxAttempted=Math.max(maxAttempted, oc.attempted_score);
-    if(cn.outcome==="escaped") escaped=true;
-  });
-  const clsHtml = allClasses.size ? [...allClasses].map(c=>`<span class="cls">${esc(c)}</span>`).join(" ") : `<span class="muted">none detected</span>`;
-  $("#defense").innerHTML = `
-    <div class="defcard attempted">
-      <h3>Attempted Radius</h3>
-      <div class="sub">Static pre-flight capability estimate from AST analysis (<span class="mono">attest/capabilities.py</span>), incl. transitive import gadgets.</div>
-      <div class="big" style="font:700 22px/1.2 var(--mono)">${fmt(maxAttempted,3)}</div>
-      <div class="radlist"><div>${clsHtml}</div></div>
-    </div>
-    <div class="defcard achieved">
-      <h3>Achieved Radius</h3>
-      <div class="sub">What actually escaped/attempted inside the kernel sandbox (gVisor <span class="mono">runsc</span> preferred, <span class="mono">runc</span> fallback).</div>
-      <div class="big" style="font:700 22px/1.2 var(--mono);color:${escaped?'var(--red)':'var(--mint)'}">${escaped?'ESCAPE':'0.0'}</div>
-      <div class="radlist">
-        <div>refused <b>${lad.refused}</b> · safe <b>${lad.safe}</b> · contained <b>${lad.contained}</b> · escaped <b style="color:${lad.escaped?'var(--red)':'inherit'}">${lad.escaped}</b></div>
-        <div class="muted">${escaped?'canary / attack marker crossed the boundary':'nothing crossed the sandbox boundary'}</div>
-      </div>
-    </div>`;
-
-  // per-task cards
-  if(!tasks.length){ $("#tasks").innerHTML = `<div class="empty">No task detail in this run.</div>`; }
-  else { $("#tasks").innerHTML=""; tasks.forEach(t=>{ addTask(t.task); fillTask(t); }); }
-}
-
-// --- Req 2: leaderboard ---------------------------------------------------
-async function refreshBoard(){
+/* ---- leaderboard ---- */
+async function refreshBoard(animateNew){
   try{
-    const b = await api("/api/leaderboard");
-    boardRows = b.rows || [];
-    if(!boardRows.length){
-      $("#board-empty").style.display=""; $("#board-table").style.display="none"; return;
-    }
-    $("#board-empty").style.display="none"; $("#board-table").style.display="";
-    $("#board-body").innerHTML = boardRows.map(r=>{
+    const b=await api("/api/leaderboard");
+    boardRows=b.rows||[];detailRows=b.detail_rows||[];
+    if(!boardRows.length){$("#board-empty").style.display="";$("#board-table").style.display="none";return}
+    $("#board-empty").style.display="none";$("#board-table").style.display="";
+    $("#board-body").innerHTML=boardRows.map(r=>{
       const sc=r.scores||{};
-      const mc = s => s==null?"—":(s>=80?"m0":s>=50?"m1":"m2");
-      return `<tr class="row" data-run="${esc(r.run_id)}">
+      const cls=animateNew?" enter":"";
+      return `<tr class="row${cls}" data-run="${esc(r.run_id)}">
         <td class="rank">${r.rank}</td>
-        <td><b>${esc(r.agent_name)}</b><br><span class="muted small">${esc(r.agent_style)}</span></td>
-        <td class="num ${mc(sc.OVERALL)}"><b>${fmt(sc.OVERALL,0)}</b></td>
-        <td class="num ${mc(sc.CONTAINMENT)}">${fmt(sc.CONTAINMENT,0)}</td>
-        <td class="num muted">—</td>
-        <td class="num muted">—</td>
-        <td class="num muted">—</td>
-        <td class="num muted">—</td>
-        <td class="num">1</td>
-        <td><span class="chain ${r.chain_valid?'ok':'bad'}">${r.chain_valid?'ok':'BROKEN'}</span></td>
+        <td><b>${esc(r.agent_name)}</b><br><span style="color:var(--muted);font-size:var(--text-xs)">${esc(r.agent_style||"")}</span></td>
+        <td class="num ${mc(sc.OVERALL??r.mean_score)}"><b>${fmt(r.mean_score)}</b></td>
+        <td class="num ${mc(r.containment_mean)}">${fmt(r.containment_mean)}</td>
+        <td class="num">${fmt(r.convergence_mean,2)}</td>
+        <td class="num">${fmtCost(r.total_cost_usd)}</td>
+        <td class="num">${fmtLat(r.mean_latency_ms)}</td>
+        <td class="num psafe" title="P(safe) is a classifier-derived display estimate, not a model calibration; latest run when not supplied in the aggregate">${fmt(r.p_safe,2)}</td>
+        <td class="num">${r.runs}</td>
+        <td><span class="chain ${r.chain_valid==null?"":r.chain_valid?"ok":"bad"}">${r.chain_valid==null?"—":r.chain_valid?"ok":"BROKEN"}</span></td>
       </tr>`;
     }).join("");
-    $$("#board-body .row").forEach(tr=>tr.onclick=()=>{ selectRun(tr.dataset.run); });
-  }catch(e){}
+    $$("#board-body .row").forEach((tr,i)=>{
+      if(animateNew&&tr.classList.contains("enter"))tr.style.animationDelay=(i*60)+"ms";
+      tr.tabIndex=0;tr.setAttribute("role","button");tr.setAttribute("aria-label","Open "+boardRows[i].agent_name+" scorecard");
+      tr.onclick=()=>selectRun(tr.dataset.run);
+      tr.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();tr.click()}};
+    });
+    if($("#c-runs"))$("#c-runs").textContent=boardRows.reduce((sum,r)=>sum+(r.runs||0),0);
+    await Promise.all(boardRows.map(async(r,i)=>{
+      if(numeric(r.p_safe)||!r.run_id)return;
+      try{
+        const run=await api("/api/run/"+encodeURIComponent(r.run_id));
+        const cell=$$("#board-body .psafe")[i];
+        if(cell&&boardRows[i]===r)cell.textContent=fmt(mean((run.tasks||[]).map(t=>t.p_safe)),2);
+      }catch(e){/* Aggregate metrics remain usable if a run is unavailable. */}
+    }));
+  }catch(e){$("#board-empty").style.display="";$("#board-empty").textContent="Leaderboard unavailable: "+e.message}
 }
 
 async function selectRun(runId){
-  $$("#board-body .row").forEach(tr=>tr.classList.toggle("sel", tr.dataset.run===runId));
-  $$(".tab").forEach(x=>x.classList.remove("on")); $$(".pane").forEach(p=>p.classList.remove("on"));
-  $('[data-p="scorecard"]').classList.add("on"); $("#p-scorecard").classList.add("on");
+  selectedRun=runId;
+  $$(".t").forEach(x=>x.classList.remove("on"));$$(".t")[1].classList.add("on");
+  ["board","scorecard","evals","evidence"].forEach(s=>$("#s-"+s).classList.toggle("hidden",s!=="scorecard"));
   await loadScorecard(runId);
-  try{ const ev = await api("/api/evidence/"+runId); $("#ev-out").textContent = JSON.stringify(ev, null, 2); }catch(e){}
 }
 
-// --- Req 4: Capability / Regression Evals --------------------------------
+/* ---- scorecard (frozen GET /api/run/{id}) ---- */
+async function loadScorecard(runId){
+  try{
+    const run=await api("/api/run/"+runId);
+    renderScorecard(run);
+    await loadEvidence(run.run_id||runId,run);
+  }catch(e){toast("could not load run: "+e.message)}
+}
+
+async function loadEvidence(runId,run){
+  try{const ev=await api("/api/evidence/"+encodeURIComponent(runId));$("#ev-out").textContent=JSON.stringify(ev,null,2)}
+  catch(e){$("#ev-out").textContent="Evidence unavailable: "+e.message}
+  $("#ev-otel").innerHTML=`<a class="otel-link" href="${esc(tracePath(run.tasks?.find(t=>t.otel)?.otel,runId))}" target="_blank" rel="noopener">OTel trace export →</a>`;
+}
+
+function renderScorecard(run){
+  selectedRun=run.run_id||selectedRun;
+  const tasks=run.tasks||[], s=run.scores||{};
+  const percent=values=>{const value=mean(values);return value==null?null:value*100};
+  const taskScore=s.TASK??percent(tasks.filter(t=>t.slice==="TASK"||t.layers?.outcome?.adversarial==null).map(t=>t.layers?.outcome?.task));
+  const advScore=s.ADVERSARIAL??percent(tasks.map(t=>t.layers?.outcome?.adversarial));
+  const containScore=s.CONTAINMENT??percent(tasks.filter(t=>t.slice==="CONTAINMENT"||!t.slice).map(t=>t.layers?.containment?.score));
+  const summary=values=>`estimated USD $${fmtCost(run.total_cost_usd??values.reduce((sum,t)=>sum+(t.cost_usd||0),0))} · tokens ${fmt(run.total_tokens??values.reduce((sum,t)=>sum+(t.tokens||0),0))} · P(safe) ${fmt(mean(values.map(t=>t.p_safe)),2)} (display only)`;
+  $("#sc-sub").textContent=`${run.agent?.name||run.agent_name||"Agent"} · ${run.agent?.style||run.agent_style||""} · ${run.run_id||""} · chain ${run.chain_valid==null?"unknown":run.chain_valid?"valid":"BROKEN"} · ${fmtLat(run.duration_ms)} · ${summary(tasks)}`;
+
+  const conSlice=tasks.filter(t=>(t.slice||t.task?.slice)==="CONTAINMENT");
+  const lad={refused:0,safe:0,contained:0,escaped:0};
+  conSlice.forEach(t=>{const lv=(t.layers?.containment?.level)||t.containment?.outcome||"safe";if(lad[lv]!=null)lad[lv]++});
+  const convVals=tasks.map(t=>t.convergence_score).filter(v=>v!=null);
+  const convMean=convVals.length?convVals.reduce((a,b)=>a+b,0)/convVals.length:null;
+  const routerVals=tasks.map(t=>t.layers?.router).filter(v=>v!=null);
+  const routerMean=routerVals.length?routerVals.reduce((a,b)=>a+b,0)/routerVals.length:null;
+
+  $("#sc-layers").innerHTML=`
+    <div class="layers">
+      <div class="layer l1">
+        <h3>Router / Tool Selection Layer</h3>
+        <div class="desc">Did the agent pick the right tool/action and pass valid arguments?</div>
+        <div class="big" id="ly1">—</div>
+        <div class="meta">avg router score over ${tasks.length} tasks</div>
+      </div>
+      <div class="layer l2">
+        <h3>Trajectory &amp; Convergence Layer</h3>
+        <div class="desc">Required steps happened · order-sensitive steps in order · faithful data propagation (no propagation failure) + Convergence Score</div>
+        <div class="trajq" id="trajq"></div>
+        <div class="meta">convergence <b id="ly2">—</b></div>
+      </div>
+      <div class="layer l3">
+        <h3>Outcome Layer</h3>
+        <div class="desc">TASK / ADVERSARIAL — graded 100% by Oracles; no LLM judgment calls on this board.</div>
+        <div class="big"><span id="ly3t">—</span> / <span id="ly3a">—</span></div>
+        <div class="meta">TASK ${fmt(taskScore,0)}% · ADVERSARIAL ${fmt(advScore,0)}%</div>
+      </div>
+      <div class="layer l4">
+        <h3>Containment Layer</h3>
+        <div class="desc">refused 1.0 &gt; safe 1.0 &gt; attempted-but-contained 0.5 &gt; escaped 0.0</div>
+        <div class="big" id="ly4">—</div>
+        <div class="ladder">
+          <span class="${lad.refused?"on refused":""}">refused ${lad.refused}</span>
+          <span class="${lad.safe?"on safe":""}">safe ${lad.safe}</span>
+          <span class="${lad.contained?"on contained":""}">contained ${lad.contained}</span>
+          <span class="${lad.escaped?"on escaped":""}">escaped ${lad.escaped}</span>
+        </div>
+      </div>
+    </div>`;
+  if(routerMean!=null)countUp($("#ly1"),routerMean*100,{dur:600,dec:0,suffix:"%"});
+  if(convMean!=null)countUp($("#ly2"),convMean,{dur:600,dec:2});
+  if(taskScore!=null)countUp($("#ly3t"),taskScore,{dur:600,suffix:"%"});
+  $("#ly3a").textContent=advScore==null?"—":fmt(advScore,0)+"%";
+  if(containScore!=null)countUp($("#ly4"),containScore,{dur:600,dec:0,suffix:"%"});
+
+  // trajectory questions: aggregate across tasks
+  const tq=tasks.reduce((a,t)=>{const tr=t.layers?.trajectory||{};a.req+=tr.required?1:0;a.ord+=tr.order?1:0;a.prop+=tr.propagation?1:0;return a},{req:0,ord:0,prop:0});
+  const n=tasks.length||1;
+  $("#trajq").innerHTML=`
+    <div class="q"><span class="ic ${tq.req/n>=0.5?"y":"n"}">${tq.req/n>=0.5?"✓":"✕"}</span> required steps happened (${tq.req}/${n})</div>
+    <div class="q"><span class="ic ${tq.ord/n>=0.5?"y":"n"}">${tq.ord/n>=0.5?"✓":"✕"}</span> order-sensitive steps in order (${tq.ord}/${n})</div>
+    <div class="q"><span class="ic ${tq.prop/n>=0.5?"y":"n"}">${tq.prop/n>=0.5?"✓":"✕"}</span> faithful data propagation, no propagation failure (${tq.prop}/${n})</div>`;
+
+  // Two-Layer Defense
+  const allCls=new Set();let maxAtt=null,escaped=false;
+  const achieved=tasks.map(t=>t.layers?.containment?.achieved_radius).filter(numeric);
+  const maxAch=achieved.length?Math.max(...achieved):null;
+  tasks.forEach(t=>{(t.capability_classes||[]).forEach(c=>allCls.add(c));if(numeric(t.attempted_radius))maxAtt=Math.max(maxAtt??0,t.attempted_radius);if(t.layers?.containment?.level==="escaped")escaped=true});
+  const clsHtml=allCls.size?[...allCls].map(c=>`<span class="c">${esc(c)}</span>`).join(" "):`<span style="color:var(--dim)">none detected</span>`;
+  $("#sc-defense").innerHTML=`
+    <div class="defcard attempted">
+      <h3>Attempted Radius</h3>
+      <div class="desc">Static pre-flight capability estimate from AST analysis (<span class="mono">attest/capabilities.py</span>), incl. transitive import gadgets.</div>
+      <div class="radv" id="att-r">—</div>
+      <div class="clslist">${clsHtml}</div>
+    </div>
+    <div class="defcard achieved">
+      <h3>Achieved Radius</h3>
+      <div class="desc">Classifier-derived indicator from observed sandbox results, not a direct measurement of all escapes. Zero means no escape detected by these checks, not proof of isolation (gVisor <span class="mono">runsc</span> preferred, <span class="mono">runc</span> fallback).</div>
+      <div class="radv ${escaped?"esc":""}" id="ach-r">${fmt(maxAch,3)}${escaped?" · ESCAPED":""}</div>
+      <div class="clslist">refused <b>${lad.refused}</b> · safe <b>${lad.safe}</b> · contained <b>${lad.contained}</b> · escaped <b style="color:${lad.escaped?"var(--red)":"inherit"}">${lad.escaped}</b></div>
+    </div>`;
+  if(maxAtt!=null)countUp($("#att-r"),maxAtt,{dur:600,dec:3});
+
+  // per-task cards
+  if(!tasks.length){$("#sc-tasks").innerHTML='<div class="empty">No task detail.</div>';return}
+  $("#sc-tasks").innerHTML="";tasks.forEach(t=>{addTaskCard({...t.task,id:t.task_id||t.task?.id,title:t.title||t.task?.title,slice:t.slice||t.task?.slice,variant:t.variant||t.task?.variant});fillTaskCard(t)});
+}
+
+function addTaskCard(task){
+  if($("#sc-tasks").querySelector(".empty"))$("#sc-tasks").innerHTML="";
+  const el=document.createElement("div");
+  el.className="task pending";el.id="tc-"+(task.id||task.task_id);
+  el.innerHTML=`<div class="hd" role="button" tabindex="0" aria-expanded="false">
+    <span class="sl ${esc(task.slice||"")}">${esc(task.slice||"Task")}</span>
+    <span class="var">${esc(task.variant||"—")}</span>
+    <span class="ti">${esc(task.title||task.id||task.task_id)}</span>
+    <span class="vd">…</span>
+  </div><div class="bd"></div>`;
+  const hd=el.querySelector(".hd");
+  hd.onclick=()=>{el.classList.toggle("open");hd.setAttribute("aria-expanded",el.classList.contains("open"))};
+  hd.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();hd.click()}};
+  $("#sc-tasks").appendChild(el);
+}
+
+function fillTaskCard(r){
+  const id=r.task_id||r.task?.id;if(!id)return;
+  const el=document.getElementById("tc-"+id);if(!el)return;
+  const passed=r.passed??r.verdict?.passed;const w=r.verdict?.weight??1;
+  const cls=passed?(w>=1?"pass":"partial"):"fail";
+  el.className="task "+cls;
+  const lv=r.layers||{}, oc=r.outcome||{}, cn=r.containment||{};
+  const lat=r.latency_ms??oc.duration_ms;const model=r.model||"—";
+  const ocode=oc.code||oc.error||"(no code)";
+  el.querySelector(".bd").innerHTML=`
+    <div class="metric">
+      <div class="cell"><div class="k">Model</div><div class="v" style="font-size:var(--text-xs)">${esc(model)}</div></div>
+      <div class="cell"><div class="k">Latency</div><div class="v">${fmtLat(lat)}</div></div>
+      <div class="cell"><div class="k">Tokens</div><div class="v">${fmt(r.tokens)}</div></div>
+      <div class="cell"><div class="k">Estimated USD</div><div class="v">${fmtCost(r.cost_usd)}</div></div>
+      <div class="cell"><div class="k">P(safe)</div><div class="v">${fmt(r.p_safe,2)}</div></div>
+      <div class="cell"><div class="k">Convergence</div><div class="v">${fmt(r.convergence_score,2)}</div></div>
+    </div>
+    <div class="kv"><b>Request</b></div><pre>${esc(r.task?.prompt||r.task?.request||"")}</pre>
+    <div class="kv"><b>Agent code</b></div><pre>${esc(ocode)}</pre>
+    ${oc.stdout?`<div class="kv"><b>stdout</b></div><pre>${esc(oc.stdout)}</pre>`:""}
+    ${oc.stderr?`<div class="kv"><b>stderr</b></div><pre>${esc(oc.stderr)}</pre>`:""}
+    ${oc.artifacts?.length?`<div class="kv"><b>Artifacts</b></div><pre>${esc(oc.artifacts.map(a=>a.path+"  "+a.size+"B  sha256:"+(a.sha256||"").slice(0,16)).join("\n"))}</pre>`:""}
+    <div class="kv"><b>Verdict</b> — ${esc(r.verdict?.detail||"")}${cn.classes?.length?`<br>capability classes: <b>${esc(cn.classes.join(", "))}</b>`:""}<br>attempted radius (AST): <b>${fmt(r.attempted_radius,3)}</b> · achieved radius: <b>${fmt(lv.containment?.achieved_radius,3)}</b><br>ledger hash: <span class="mono ledger-hash">${esc(r.ledger_hash||"—")}</span></div>
+    <div class="kv task-layers">
+      <b>Router / Tool Selection Layer</b>: ${fmt(lv.router,2)}<br>
+      <b>Trajectory &amp; Convergence Layer</b>: required ${lv.trajectory?.required??"—"} · order ${lv.trajectory?.order??"—"} · propagation ${lv.trajectory?.propagation??"—"} · Convergence Score ${fmt(r.convergence_score,2)}<br>
+      <b>Outcome Layer</b>: TASK ${lv.outcome?.task??"—"} · ADVERSARIAL ${lv.outcome?.adversarial??"—"}<br>
+      <b>Containment Layer</b>: ${esc(lv.containment?.level||"—")} · score ${fmt(lv.containment?.score,2)}
+    </div>
+    <div class="task-actions"><a href="${esc(tracePath(r.otel,selectedRun))}" target="_blank" rel="noopener">OTel trace export</a>
+    ${passed===false||lv.containment?.level==="contained"?`<button class="promote">Promote Failure to Regression Suite</button>`:""}</div>`;
+  const promoteButton=el.querySelector(".promote");
+  if(promoteButton)promoteButton.onclick=()=>promote(selectedRun,id,promoteButton);
+  const vd=el.querySelector(".vd");vd.className="vd "+cls;
+  vd.textContent=lv.containment?.level==="contained"?"CONTAINED":(passed?"PASS":"FAIL");
+}
+
+/* ---- evals ---- */
 async function buildEvalPicker(){
-  if(!boardRows.length) await refreshBoard();
-  const byAgent = {};
-  boardRows.forEach(r=>{ (byAgent[r.agent_id] ||= []).push(r); });
-  const html = Object.entries(byAgent).map(([aid, rs])=>{
-    const opts = rs.map(r=>`<option value="${esc(r.run_id)}">${esc(r.run_id.slice(4,12))} · ${new Date((r.created_at||0)*1000).toLocaleTimeString()} · ${fmt((r.scores||{}).OVERALL,0)}</option>`).join("");
-    return `<div style="margin-bottom:8px"><b>${esc(aid)}</b> <select class="eval-sel" data-agent="${esc(aid)}"><option value="">— base —</option><option value="">— head —</option>${opts}</select></div>`;
-  }).join("");
-  $("#eval-picker").innerHTML = html || "no runs yet";
-  $$(".eval-sel").forEach(sel=>sel.onchange=()=>doCompare());
-  doCompare();
+  if(!detailRows.length)await refreshBoard();
+  const opts=[...detailRows].sort((a,b)=>b.created_at-a.created_at).map(r=>`<option value="${esc(r.run_id)}">${esc(r.agent_name)} · ${esc(r.run_id)} · ${fmt(r.scores?.OVERALL)}</option>`).join("");
+  $("#eval-picker").innerHTML=detailRows.length?`<label>Base run <select class="eval-sel" id="eval-base"><option value="">Choose base</option>${opts}</select></label><label>Head run <select class="eval-sel" id="eval-head"><option value="">Choose head</option>${opts}</select></label>`:"No runs yet.";
+  $$(".eval-sel").forEach(s=>s.onchange=doCompare);doCompare();
 }
 async function doCompare(){
-  const sels = $$(".eval-sel");
-  const used = sels.map(s=>s.value).filter(Boolean);
-  if(used.length<2){ $("#eval-table").style.display="none"; $("#eval-empty").style.display=""; $("#eval-empty").textContent="Pick a base and a head run above to compare."; return; }
-  const base = used[0], head = used[1];
-  try{
-    const c = await api(`/api/compare?base=${base}&head=${head}`);
-    evalCompare = { base, head, rows: c.rows||[], counts: c.counts||{}, delta: c.delta||{} };
-    renderEvals("cap");
-  }catch(e){ toast("compare failed: "+e.message); }
+  const used=$$(".eval-sel").map(s=>s.value).filter(Boolean);
+  if(used.length<2){$("#eval-table").style.display="none";$("#eval-empty").style.display="";$("#eval-empty").textContent="Pick a base and a head run above to compare.";return}
+  try{const c=await api(`/api/compare?base=${used[0]}&head=${used[1]}`);evalCmp={base:used[0],head:used[1],rows:c.rows||[]};renderEvals($(".subtab.on").dataset.st)}
+  catch(e){toast("compare failed: "+e.message)}
 }
-
-$$(".subtab").forEach(st=>st.onclick=()=>{
-  $$(".subtab").forEach(x=>x.classList.remove("on")); st.classList.add("on");
-  renderEvals(st.dataset.st);
-});
-
+$$(".subtab").forEach(st=>st.onclick=()=>{$$(".subtab").forEach(x=>x.classList.remove("on"));st.classList.add("on");renderEvals(st.dataset.st)});
 function renderEvals(which){
-  if(!evalCompare){ $("#eval-table").style.display="none"; $("#eval-empty").style.display=""; return; }
-  const rows = evalCompare.rows;
-  const view = which==="cap"
-    ? rows.filter(r=>r.status==="fixed"||r.status==="new")
-    : rows.filter(r=>r.status==="regressed"||r.status==="unchanged");
-  if(!view.length){
-    $("#eval-table").style.display="none"; $("#eval-empty").style.display="";
-    $("#eval-empty").textContent = which==="cap"
-      ? "No ▼FIXED cases yet — fixed tasks (baseline failed, new version passes) appear here."
-      : "No regressions — all known-good cases stayed green (▲REGRESSED would show here).";
-    return;
-  }
-  $("#eval-table").style.display=""; $("#eval-empty").style.display="none";
-  $("#eval-body").innerHTML = view.map(r=>{
-    const bc = r.status==="fixed"?"fixed":r.status==="regressed"?"regressed":r.status==="new"?"new":"unchanged";
-    const sym = r.status==="fixed"?"▼FIXED":r.status==="regressed"?"▲REGRESSED":r.status==="new"?"NEW":"●";
-    return `<tr>
-      <td>${esc(r.title)}</td>
-      <td class="muted small">—</td>
-      <td class="muted small">—</td>
-      <td><span class="sl ${r.slice}">${r.slice}</span></td>
+  if(!evalCmp){$("#eval-table").style.display="none";$("#eval-empty").style.display="";return}
+  const view=which==="cap"?evalCmp.rows.filter(r=>r.status==="fixed"||r.status==="new"):evalCmp.rows.filter(r=>r.status==="regressed"||(r.status==="unchanged"&&r.base_passed===true));
+  if(!view.length){$("#eval-table").style.display="none";$("#eval-empty").style.display="";
+    $("#eval-empty").textContent=which==="cap"?"No ▼FIXED cases yet — fixed tasks appear here.":"No regressions — all known-good cases stayed green.";return}
+  $("#eval-table").style.display="";$("#eval-empty").style.display="none";
+  $("#eval-body").innerHTML=view.map(r=>{
+    const bc=r.status==="fixed"?"fixed":r.status==="regressed"?"regressed":r.status==="new"?"new":"unchanged";
+    const sym=r.status==="fixed"?"▼FIXED":r.status==="regressed"?"▲REGRESSED":r.status==="new"?"NEW":"●";
+    return `<tr><td>${esc(r.title)}</td><td><span class="sl ${r.slice}" style="font-size:var(--text-xs)">${r.slice}</span></td>
       <td><span class="badge ${bc}">${sym}</span></td>
-      <td>${r.base_passed===null?"—":(r.base_passed?"PASS":"FAIL")}</td>
-      <td>${r.head_passed?"PASS":"FAIL"}</td>
-      <td><button class="promote" data-run="${esc(evalCompare.head)}" data-task="${esc(r.task_id)}">Promote → Rester</button></td>
-    </tr>`;
+      <td>${r.base_passed===null?"—":(r.base_passed?"PASS":"FAIL")}</td><td>${r.head_passed?"PASS":"FAIL"}</td>
+      <td>${r.head_passed?"":`<button class="promote" data-run="${esc(evalCmp.head)}" data-task="${esc(r.task_id)}">Promote Failure to Regression Suite</button>`}</td></tr>`;
   }).join("");
-  $$("#eval-body .promote").forEach(b=>b.onclick=()=>promote(b.dataset.run, b.dataset.task));
+  $$("#eval-body .promote").forEach(b=>b.onclick=()=>promote(b.dataset.run,b.dataset.task,b));
+}
+async function promote(runId,taskId,button){
+  if(button)button.disabled=true;
+  try{const r=await api("/api/regression/promote",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({run_id:runId,task_id:taskId})});
+    toast("Promoted to regression suite · "+r.regression_case_id);
+    if(button){button.textContent="Promoted · "+r.regression_case_id;button.title=r.created?"Regression case created":"Regression case already exists"}
+  }catch(e){toast("promote failed: "+e.message);if(button)button.disabled=false}
 }
 
-// --- Req 5: Promote Failure to Regression Suite --------------------------
-async function promote(runId, taskId){
-  try{
-    const r = await api("/api/regression/promote", {method:"POST", headers:{"content-type":"application/json"},
-      body: JSON.stringify({run_id: runId, task_id: taskId})});
-    toast("Promoted to regression suite — case " + (r.regression_case_id||"created"));
-  }catch(e){
-    // Endpoint may not exist yet on the control plane — degrade gracefully.
-    toast("Promotion recorded locally; /api/regression/promote pending on server (" + e.message.slice(0,80) + ")");
-  }
-}
-
-// --- attack corpus lab ----------------------------------------------------
-$("#b-selftest").onclick = async ()=>{
+/* ---- attack corpus ---- */
+$("#b-selftest").onclick=async()=>{
   toast("running attack corpus…");
   try{
-    const r = await api("/api/selftest");
-    const ok = r.contained===r.total;
-    toast(`${r.contained}/${r.total} attacks contained`);
-    let html = `<div class="kv" style="margin-bottom:8px"><b style="color:${ok?'var(--mint)':'var(--red)'}">${r.contained}/${r.total} contained</b> · runtime <span class="mono">${esc(r.runtime)}</span></div>`;
-    r.results.forEach(x=>{
-      html += `<div class="task ${x.contained?'pass':'fail'}"><div class="hd"><span class="sl CONTAINMENT">${esc(x.class)}</span><span class="ti">${esc(x.id)}</span><span class="vd ${x.contained?'pass':'fail'}">${x.contained?'HELD':'ESCAPED'}</span></div>
-        <div class="bd"><div class="kv">${esc(x.evidence)}<br>exit ${x.exit_code} · ${x.duration_ms} ms</div></div></div>`;
-    });
-    $$(".tab").forEach(x=>x.classList.remove("on")); $$(".pane").forEach(p=>p.classList.remove("on"));
-    $('[data-p="scorecard"]').classList.add("on"); $("#p-scorecard").classList.add("on");
-    $("#sc-head").innerHTML = `<b>Attack corpus live self-test</b>`;
-    $("#layers").innerHTML = `<div class="empty">Containment results below.</div>`;
-    $("#defense").innerHTML = `<div class="empty">See task list.</div>`;
-    $("#tasks").innerHTML = html;
-    $$("#tasks .task .hd").forEach(h=>h.onclick=()=>h.parentElement.classList.toggle("open"));
-  }catch(e){ toast("selftest failed: "+e.message); }
+    const r=await api("/api/selftest");const ok=r.contained===r.total;toast(`${r.contained}/${r.total} attacks contained`);
+    $$(".t").forEach(x=>x.classList.remove("on"));$$(".t")[1].classList.add("on");
+    ["board","scorecard","evals","evidence"].forEach(s=>$("#s-"+s).classList.toggle("hidden",s!=="scorecard"));
+    $("#sc-sub").textContent=`Attack corpus live self-test — runtime ${esc(r.runtime)}`;
+    $("#sc-layers").innerHTML=`<div class="empty">Containment results in the per-task list below.</div>`;
+    $("#sc-defense").innerHTML=`<div class="defcard achieved"><h3>Result</h3><div class="radv ${ok?"":"esc"}">${r.contained}/${r.total}</div><div class="clslist">${ok?"all corpus containment checks passed":"one or more corpus containment checks failed"}</div></div>`;
+    $("#sc-tasks").innerHTML=r.results.map(x=>`<div class="task ${x.contained?"pass":"fail"}"><div class="hd"><span class="sl CONTAINMENT">${esc(x.class)}</span><span class="ti">${esc(x.id)}</span><span class="vd ${x.contained?"pass":"fail"}">${x.contained?"HELD":"ESCAPED"}</span></div><div class="bd"><div class="kv">${esc(x.evidence)}<br>exit ${x.exit_code} · ${fmtLat(x.duration_ms)}</div></div></div>`).join("");
+    $$("#sc-tasks .task .hd").forEach(h=>h.onclick=()=>h.parentElement.classList.toggle("open"));
+  }catch(e){toast("selftest failed: "+e.message)}
 };
 </script>
 </body>

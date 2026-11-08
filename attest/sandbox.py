@@ -244,6 +244,8 @@ def run_code(
     environment is inherited.
     """
     runtime = runtime or detect_runtime()
+    if os.environ.get("REQUIRE_GVISOR") == "1" and runtime != DEFAULT_RUNTIME:
+        raise SandboxError("gVisor is required; refusing fallback runtime")
     container = f"attest-run-{os.getpid()}-{int(time.time() * 1000) % 100000}"
 
     docker_args = [

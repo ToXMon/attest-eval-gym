@@ -1,354 +1,270 @@
 #!/usr/bin/env bash
-#
-# ATTEST control-plane deploy on Vultr (Track 01 demo).
-#
-#   scripts/deploy.sh [--dry-run] [--region R] [--plan P] [--ssh-key-id ID]
-#
-# What it does:
-#   1. Reuses the existing Vultr instance tagged `attest-ctrl-plane`, or
-#      creates one: vc2-2c-4gb, Ubuntu 24.04 x64, cloud-init installs
-#      Docker + gVisor (runsc) + cloudflared and locks the firewall to SSH.
-#   2. Uploads the repo (rsync), writes .env on the VM only (never printed,
-#      never committed), builds the venv.
-#   3. Installs systemd units: attest.service (uvicorn :8000) and
-#      attest-cloudflared.service (Quick Tunnel), then prints the public
-#      trycloudflare.com URL.
-#
-# Secrets: the Vultr API key is read from .env, passed to curl via a 0600
-# header file (never in argv, never echoed, never committed). VULTR_* vars
-# live only in the control-plane process on the VM; attest/sandbox.py spawns
-# containers with no inherited environment, so they never reach a sandbox.
-#
-# Idempotent: safe to re-run; an existing tagged instance is reused and only
-# the upload + service refresh happens.
-#
-# See also: scripts/destroy.sh (tear everything down).
-
+# Fresh Vultr control-plane deployment. --dry-run is strictly offline.
 set -euo pipefail
-
-# --- constants ------------------------------------------------------------------
-
-TAG="attest-ctrl-plane"
-DEFAULT_REGION="${ATTEST_REGION:-ewr}"
-DEFAULT_PLAN="${ATTEST_PLAN:-vc2-2c-4gb}"
-VULTR_API="https://api.vultr.com/v2"
-VM_APP_DIR="/opt/attest"
-# SSH key for the control-plane VM. The identity file is explicit because the
-# deploy host may have several keys loaded in the agent; IdentitiesOnly stops
-# ssh from offering (and burning attempts on) the wrong ones. Override the
-# path with ATTEST_SSH_KEY_FILE.
+TAG=attest-ctrl-plane
+VULTR_API=https://api.vultr.com/v2
+VM_APP_DIR=/opt/attest
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SSH_KEY_FILE="${ATTEST_SSH_KEY_FILE:-$HOME/.ssh/attest_vultr}"
-SSH_OPTS=(-o IdentityFile="$SSH_KEY_FILE" -o IdentitiesOnly=yes \
-          -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10)
-
-# --- helpers --------------------------------------------------------------------
-
-err()  { printf 'error: %s\n' "$*" >&2; }
-log()  { printf '==> %s\n' "$*"; }
-die()  { err "$*"; exit 1; }
-
+SSH_KEY_ID="${ATTEST_SSH_KEY_ID:-}"
+EXPECTED_EMAIL="${ATTEST_EXPECTED_ACCOUNT_EMAIL-contact@bullynothub.com}"
+REGION="${ATTEST_REGION:-ewr}"
+PLAN="${ATTEST_PLAN:-vc2-2c-4gb}"
+DRY_RUN=0
+OPEN_PUBLIC=0
+REUSE_ID=""
 hdr_file=""
+inference_file=""
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+log() { printf '==> %s\n' "$*"; }
 cleanup() {
-  if [[ -n "$hdr_file" ]]; then rm -f "$hdr_file"; fi
+  [[ -z "$hdr_file" ]] || rm -f "$hdr_file"
+  [[ -z "$inference_file" ]] || rm -f "$inference_file"
+  return 0
 }
 trap cleanup EXIT
+SSH_OPTS=(-o "IdentityFile=$SSH_KEY_FILE" -o IdentitiesOnly=yes
+          -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10)
+# Source allowlist plus state exclusions. No local database or run is uploaded.
+EXCLUDES=(.git .venv .env '.env.*' .agents runs quarantine screenshots
+          '*.db' '*.db-*' '*.sqlite*' '__pycache__' '*.pyc' '*cache*'
+          '*.png' '*.jpg' '*.jpeg' '*.webp' '*.gif' '*.tmp' '*.temp' '*.swp'
+          '*.log' '.DS_Store' '*.pem' '*.key' 'id_*')
+RSYNC_ARGS=(-az --delete --no-links)
+for pattern in "${EXCLUDES[@]}"; do RSYNC_ARGS+=(--exclude "$pattern"); done
+RSYNC_ARGS+=(--include /attest/ --include '/attest/***'
+             --include /scripts/ --include '/scripts/***'
+             --include /requirements.txt --exclude '*')
 
-# Load the API key from .env WITHOUT sourcing it (never execute .env content).
-load_api_key() {
-  local root
-  root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-  [[ -f "$root/.env" ]] || die ".env not found at $root/.env (see spec: secrets live there only)"
-  VULTR_API_KEY="$(sed -n 's/^VULTR_API_KEY=//p' "$root/.env" | tail -1)"
-  # strip optional surrounding quotes, never echo the value
-  VULTR_API_KEY="${VULTR_API_KEY%\"}"; VULTR_API_KEY="${VULTR_API_KEY#\"}"
-  VULTR_API_KEY="${VULTR_API_KEY%\'}"; VULTR_API_KEY="${VULTR_API_KEY#\'}"
-  if [[ -z "$VULTR_API_KEY" ]]; then
-    die "VULTR_API_KEY is not set in .env"
-  fi
-  # Header file keeps the key out of process listings; removed by the exit trap.
-  hdr_file="$(mktemp)"
-  chmod 600 "$hdr_file"
-  printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$VULTR_API_KEY" > "$hdr_file"
-}
-
-usage() {
-  sed -n '2,12p' "$0"; exit 0
-}
-
-# --- Vultr API -------------------------------------------------------------------
-
-vultr() { # vultr METHOD PATH [JSON_BODY] -> response body (fails on non-2xx)
+vultr() {
   local method="$1" path="$2" body="${3-}" out code
-  local args=(-sS -X "$method" "${VULTR_API}${path}" -H @"$hdr_file" -w '\n%{http_code}')
-  [[ -n "$body" ]] && args+=(-d "$body")
-  out="$(curl "${args[@]}")"
+  local args=(-fsS --connect-timeout 10 --max-time 60 -X "$method"
+              "$VULTR_API$path" -H "@$hdr_file" -w $'\n%{http_code}')
+  [[ -z "$body" ]] || args+=(-d "$body")
+  out="$(curl "${args[@]}")" || die "Vultr request failed (response suppressed)"
   code="${out##*$'\n'}"
-  out="${out%$'\n'*}"
-  if [[ "$code" -lt 200 || "$code" -ge 300 ]]; then
-    die "Vultr API $method $path -> HTTP $code: ${out:0:300}"
-  fi
-  printf '%s' "$out"
+  [[ "$code" =~ ^2[0-9][0-9]$ ]] || die "Vultr request failed"
+  printf '%s' "${out%$'\n'*}"
 }
-
-call() { # call METHOD PATH [JSON_BODY] -- honour --dry-run
-  if [[ "$DRY_RUN" == "1" ]]; then
-    printf '  %s %s%s\n' "$1" "$VULTR_API" "$2"
-    [[ -n "${3-}" ]] && printf '    body: %s\n' "$3"
-    return 0
-  fi
-  vultr "$1" "$2" "${3-}"
+verify_expected_account() {
+  [[ "${EXPECTED_EMAIL:-}" == "contact@bullynothub.com" ]] \
+    || die "expected account must be contact@bullynothub.com; empty or different values are forbidden"
 }
-
-# --- cloud-init -------------------------------------------------------------------
-
+# Both requests use the same immutable header file/current key.
+preflight() {
+  local account key remote_public local_public
+  verify_expected_account
+  [[ -n "$SSH_KEY_ID" && "$SSH_KEY_ID" =~ ^[a-zA-Z0-9-]+$ ]] || die "explicit --ssh-key-id is required"
+  [[ -f "$SSH_KEY_FILE" ]] || die "ATTEST_SSH_KEY_FILE is missing"
+  account="$(vultr GET /account)"
+  jq -e --arg expected "$EXPECTED_EMAIL" '.account.email == $expected' >/dev/null <<<"$account" \
+    || die "account email missing or mismatched; required contact@bullynothub.com"
+  key="$(vultr GET "/ssh-keys/$SSH_KEY_ID")"
+  [[ "$(jq -r '.ssh_key.id' <<<"$key")" == "$SSH_KEY_ID" ]] || die "SSH key ID is not in the current account"
+  remote_public="$(jq -er '.ssh_key.ssh_key' <<<"$key" | awk '{print $1 " " $2}')"
+  # BatchMode prevents an encrypted private key from hanging unattended.
+  local_public="$(ssh-keygen -y -P '' -f "$SSH_KEY_FILE" 2>/dev/null | awk '{print $1 " " $2}')" || die "cannot derive public key (use an unencrypted dedicated deploy key)"
+  [[ -n "$local_public" && "$local_public" == "$remote_public" ]] || die "SSH public key mismatch"
+}
+# shellcheck disable=SC2029
+vm() { ssh "${SSH_OPTS[@]}" "root@$VM_IP" "$@"; }
+rsync_ssh() {
+  local arg
+  printf 'ssh'
+  for arg in "${SSH_OPTS[@]}"; do printf ' %q' "$arg"; done
+}
+wait_health() {
+  local i status
+  for ((i=0; i<30; i++)); do
+    status="$(vm "curl -fsS --max-time 5 http://127.0.0.1:8000/api/health" 2>/dev/null)" || status=""
+    if jq -e '.ok == true and .runtime == "runsc"' >/dev/null 2>&1 <<<"$status"; then return 0; fi
+    sleep 2
+  done
+  die "local health/runtime check failed; tunnel remains stopped"
+}
+verify_bootstrap() {
+  vm "timeout 900 cloud-init status --wait --long" >/dev/null || die "cloud-init failed"
+  vm "cloud-init status --format json" | jq -e '.status == "done"' >/dev/null || die "cloud-init is not done"
+  vm "docker info --format '{{json .Runtimes}}'" | jq -e 'has("runsc")' >/dev/null || die "Docker does not advertise runsc"
+}
+public_health() {
+  [[ "$1" =~ ^https://[a-zA-Z0-9-]+\.trycloudflare\.com$ ]] || return 1
+  curl -fsS --max-time 10 "$1/api/health" | jq -e '.ok == true and .runtime == "runsc"' >/dev/null
+}
+verify_reuse() {
+  local matches="$1" detail
+  [[ -n "$REUSE_ID" && "$REUSE_ID" =~ ^[a-zA-Z0-9-]+$ ]] || die "existing tagged instance requires explicit --reuse-instance-id"
+  [[ "$(jq length <<<"$matches")" == 1 ]] || die "ambiguous tagged instances"
+  [[ "$(jq -r '.[0].id' <<<"$matches")" == "$REUSE_ID" ]] || die "reuse ID not owned by current account/tag"
+  detail="$(vultr GET "/instances/$REUSE_ID")"
+  [[ "$(jq -r '.instance.id' <<<"$detail")" == "$REUSE_ID" ]] || die "fresh instance ownership verification failed"
+  [[ "$(jq -r '.instance.main_ip' <<<"$detail")" == "$(jq -r '.[0].main_ip' <<<"$matches")" ]] || die "instance IP mismatch"
+  jq -e --arg t "$TAG" '(.instance.tags // []) | index($t) != null' >/dev/null <<<"$detail" || die "instance tag mismatch"
+}
+verify_seed() {
+  local status
+  status="$(vm "curl -fsS --max-time 5 http://127.0.0.1:8000/api/leaderboard")"
+  jq -e '.rows | length >= 6' >/dev/null <<<"$status" || die "six baseline leaderboard rows required before public tunnel"
+  # Verify loaded records have valid chains in the exact deployed ledger.
+  vm "cd /opt/attest && ATTEST_DB=/var/lib/attest/attest.db ATTEST_RUNS_DIR=/var/lib/attest/runs .venv/bin/python -c 'from attest.server import RUNS, LEDGER; assert len(RUNS) >= 6; assert all(r.chain_valid and LEDGER.verify(r.run_id) for r in RUNS.values())'"
+}
 CLOUD_INIT="$(cat <<'YAML'
 #cloud-config
 package_update: true
-packages:
-  - docker.io
-  - jq
-  - curl
-  - rsync
-  - python3-venv
-  - ca-certificates
-  - ufw
+packages: [docker.io, jq, curl, rsync, python3-venv, ca-certificates, ufw]
 runcmd:
-  # firewall: SSH only -- the app is reachable through the Cloudflare tunnel
   - ufw default deny incoming
   - ufw allow OpenSSH
   - ufw --force enable
-  # gVisor runsc runtime, registered with Docker
   - curl -fsSL https://storage.googleapis.com/gvisor/releases/release/latest/x86_64/runsc -o /usr/local/bin/runsc
   - chmod 755 /usr/local/bin/runsc
   - runsc install
   - systemctl restart docker
-  # Cloudflare tunnel client
   - curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared
   - chmod 755 /usr/local/bin/cloudflared
 YAML
 )"
-
-base64_cloud_init() { base64 <<<"$CLOUD_INIT" | tr -d '\n'; }
-
-# --- instance lifecycle ------------------------------------------------------------
-
-find_instance() { # -> "id ip status power", or empty when none exists
-  local list json
-  list="$(call GET "/instances?per_page=200")"
-  json="$(jq -r --arg t "$TAG" \
-    '.instances[] | select((.tags // []) | index($t)) |
-     "\(.id) \(.main_ip) \(.status) \(.power_status)"' <<<"$list" | head -1)"
-  [[ -n "$json" ]] && printf '%s' "$json"
-  return 0
-}
-
-wait_active() { # wait_active INSTANCE_ID -> prints IP
-  local id="$1" row ip
-  for ((i = 0; i < 60; i++)); do
-    row="$(vultr GET "/instances/$id")"
-    if [[ "$(jq -r '.instance.status' <<<"$row")" == "active" ]] \
-       && [[ "$(jq -r '.instance.power_status' <<<"$row")" == "running" ]]; then
-      ip="$(jq -r '.instance.main_ip' <<<"$row")"
-      [[ -n "$ip" && "$ip" != "null" ]] && { printf '%s' "$ip"; return 0; }
+main() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run) DRY_RUN=1 ;;
+      --open-public) OPEN_PUBLIC=1 ;;
+      --reuse-instance-id) REUSE_ID="${2:?}"; shift ;;
+      --ssh-key-id) SSH_KEY_ID="${2:?}"; shift ;;
+      --region) REGION="${2:?}"; shift ;;
+      --plan) PLAN="${2:?}"; shift ;;
+      --help|-h)
+        printf '%s\n' 'deploy.sh [--dry-run] --ssh-key-id ID [--reuse-instance-id ID] [--open-public]'
+        return ;;
+      *) die "unknown option" ;;
+    esac
+    shift
+  done
+  cd "$REPO_ROOT"
+  verify_expected_account
+  if [[ "$DRY_RUN" == 1 ]]; then
+    log "OFFLINE manifest: no credentials read, no API/SSH/inference calls"
+    printf '%s\n' 'Preflight: GET /v2/account must return email exactly contact@bullynothub.com (mandatory); explicit SSH ID membership; derive and match SSH public key.'
+    printf '%s\n' 'Reuse: explicit instance ID must match fresh current-account list AND detail; ambiguous tags refused.'
+    printf 'Exclusions: %s\n' "${EXCLUDES[*]}"
+    # rsync locally lists only paths, never file contents or secret values.
+    rsync "${RSYNC_ARGS[@]}" --dry-run --out-format='%n' ./ /tmp/attest-deploy-manifest/
+    printf '%s\n' 'Upload: allowlisted source only; inference key via separate 0600 file; compute key never uploaded.'
+    printf '%s\n' 'Gates: cloud-init done; Docker runsc; actual sandbox; loopback health; manual seed verification; HTTPS public health.'
+    manual_seed
+    return
+  fi
+  for cmd in curl jq rsync ssh ssh-keygen python3; do command -v "$cmd" >/dev/null || die "$cmd is required"; done
+  [[ -n "$SSH_KEY_ID" ]] || die "explicit --ssh-key-id is required"
+  [[ -n "${VULTR_API_KEY:-}" && -n "${VULTR_INFERENCE_API_KEY:-}" ]] || die "provide compute and inference keys in caller environment; .env is never read"
+  umask 077
+  hdr_file="$(mktemp)"
+  printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$VULTR_API_KEY" >"$hdr_file"
+  export -n VULTR_INFERENCE_API_KEY
+  unset VULTR_API_KEY
+  preflight
+  local list matches os_id created body i row
+  list="$(vultr GET '/instances?per_page=200')"
+  # Refuse truncated inventories rather than guessing ownership.
+  [[ "$(jq -r '.meta.links.next // empty' <<<"$list")" == "" ]] || die "paginated inventory requires manual review"
+  matches="$(jq -c --arg tag "$TAG" '[.instances[] | select((.tags // []) | index($tag))]' <<<"$list")"
+  if [[ "$(jq length <<<"$matches")" != 0 ]]; then
+    verify_reuse "$matches"
+    VM_ID="$REUSE_ID"
+  else
+    [[ -z "$REUSE_ID" ]] || die "reuse ID not found in current account"
+    os_id="$(vultr GET '/os?per_page=500' | jq -er '[.os[] | select(.name | test("^Ubuntu 24\\.04.*x64$"))][0].id')"
+    body="$(jq -n --arg r "$REGION" --arg p "$PLAN" --arg t "$TAG" --arg k "$SSH_KEY_ID" --argjson os "$os_id" --arg ud "$(printf '%s' "$CLOUD_INIT" | base64 | tr -d '\n')" '{region:$r,plan:$p,label:$t,tags:[$t],sshkey_id:[$k],os_id:$os,user_data:$ud,backups:"disabled"}')"
+    created="$(vultr POST /instances "$body")"
+    VM_ID="$(jq -er '.instance.id' <<<"$created")"
+  fi
+  VM_IP=""
+  for ((i=0; i<60; i++)); do
+    row="$(vultr GET "/instances/$VM_ID")"
+    if jq -e '.instance.status == "active" and .instance.power_status == "running"' >/dev/null <<<"$row"; then
+      VM_IP="$(jq -er '.instance.main_ip' <<<"$row")"; break
     fi
     sleep 5
   done
-  die "instance $id did not become active within 300s"
-}
-
-wait_ssh() { # wait_ssh IP
-  local ip="$1"
-  for ((i = 0; i < 30; i++)); do
-    if ssh "${SSH_OPTS[@]}" "root@$ip" true 2>/dev/null; then return 0; fi
+  [[ "$VM_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "instance readiness/IP failed"
+  for ((i=0; i<30; i++)); do
+    if vm true 2>/dev/null; then break; fi
     sleep 4
   done
-  die "could not SSH to $ip (key: $SSH_KEY_FILE; override with ATTEST_SSH_KEY_FILE)"
-}
-
-# $VM_IP must expand client side -- it IS the target host.
-# shellcheck disable=SC2029
-vm() { ssh "${SSH_OPTS[@]}" "root@$VM_IP" "$@"; }
-
-rsync_ssh() { # the SSH_OPTS as one string for rsync's -e flag
-  local cmd="ssh" o
-  for o in "${SSH_OPTS[@]}"; do
-    cmd="$cmd '$o'"
-  done
-  printf '%s' "$cmd"
-}
-
-# --- main ---------------------------------------------------------------------------
-
-DRY_RUN=0 REGION="$DEFAULT_REGION" PLAN="$DEFAULT_PLAN" SSH_KEY_ID="${ATTEST_SSH_KEY_ID:-}"
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --dry-run)    DRY_RUN=1 ;;
-    --region)     REGION="${2:?}"; shift ;;
-    --plan)       PLAN="${2:?}"; shift ;;
-    --ssh-key-id) SSH_KEY_ID="${2:?}"; shift ;;
-    -h|--help)    usage ;;
-    *)            die "unknown flag: $1 (try --help)" ;;
-  esac
-  shift
-done
-
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$REPO_ROOT"
-
-command -v curl >/dev/null || die "curl is required"
-command -v jq   >/dev/null || die "jq is required"
-command -v rsync >/dev/null || die "rsync is required"
-
-if [[ "$DRY_RUN" != "1" ]]; then
-  [[ -f "$SSH_KEY_FILE" ]] \
-    || die "SSH key '$SSH_KEY_FILE' not found (set ATTEST_SSH_KEY_FILE to override)"
-fi
-
-if [[ "$DRY_RUN" == "1" ]]; then
-  log "DRY RUN -- printing API calls, nothing will be executed"
-  [[ -f .env ]] || log "note: .env not found yet (fine for a dry run)"
-else
-  load_api_key
-fi
-
-# 1. Idempotency: reuse the tagged instance if it exists.
-log "looking for an existing instance tagged '$TAG'"
-row=""
-if [[ "$DRY_RUN" == "1" ]]; then
-  printf '  GET  %s/instances?per_page=200   (reuse check: instance tagged %s)\n' "$VULTR_API" "$TAG"
-else
-  row="$(find_instance)"
-fi
-if [[ -n "$row" ]]; then
-  read -r VM_ID VM_IP _st _pw <<<"$row"
-  log "reusing instance $VM_ID ($VM_IP)"
-else
-  if [[ "$DRY_RUN" == "1" ]]; then
-    log "cannot check for an existing instance in dry-run; assuming none -- these calls would follow:"
-    printf '  GET  %s/os?per_page=500    (resolve "Ubuntu 24.04 x64" os_id at runtime)\n' "$VULTR_API"
-    printf '  GET  %s/ssh-keys           (resolve ssh_key_id at runtime)\n' "$VULTR_API"
-    body="$(jq -n \
-      --arg region "$REGION" --arg plan "$PLAN" \
-      --arg label "$TAG" --arg tag "$TAG" \
-      '{region:$region, plan:$plan, os_id:"<resolved at runtime>", label:$label, tags:[$tag],
-        sshkey_id:["<resolved at runtime>"], user_data:"<base64 of the cloud-init below>",
-        backups:"disabled", enable_ipv6:true}')"
-    call POST /instances "$body"
-    printf '  GET  %s/instances/{id}     (poll until status=active)\n' "$VULTR_API"
-    echo
-    log "cloud-init that would be base64'd into user_data:"
-    printf '%s\n' "$CLOUD_INIT" | sed 's/^/    /'
-    VM_ID="<new-instance-id>" VM_IP="<instance-ip>"
-  else
-    log "no instance tagged '$TAG' -- creating one"
-
-    # Resolve the OS id for Ubuntu 24.04 x64 and the SSH key to attach.
-    os_json="$(vultr GET "/os?per_page=500")"
-    OS_ID="$(jq -r '.os[] | select(.name | test("^Ubuntu 24\\.04.*x64$")) | .id' <<<"$os_json" | head -1)"
-    [[ -n "$OS_ID" ]] || die "could not resolve an Ubuntu 24.04 x64 OS id from /v2/os"
-    if [[ -z "$SSH_KEY_ID" ]]; then
-      SSH_KEY_ID="$(vultr GET "/ssh-keys" | jq -r '.ssh_keys[0].id // empty')"
-      [[ -n "$SSH_KEY_ID" ]] || die "no SSH key on the Vultr account (add one, or pass --ssh-key-id)"
-    fi
-    log "os_id=$OS_ID ssh_key_id=$SSH_KEY_ID region=$REGION plan=$PLAN"
-
-    body="$(jq -n \
-      --arg region "$REGION" --arg plan "$PLAN" --argjson os "$OS_ID" \
-      --arg label "$TAG" --arg tag "$TAG" --arg ssh "$SSH_KEY_ID" \
-      --arg ud "$(base64_cloud_init)" \
-      '{region:$region, plan:$plan, os_id:$os, label:$label, tags:[$tag],
-        sshkey_id:[$ssh], user_data:$ud, backups:"disabled", enable_ipv6:true}')"
-    created="$(vultr POST /instances "$body")"
-    VM_ID="$(jq -r '.instance.id' <<<"$created")"
-    log "created instance $VM_ID -- waiting for it to become active"
-    VM_IP="$(wait_active "$VM_ID")"
-    log "instance active at $VM_IP"
-  fi
-fi
-
-# 2. Upload the repo and write .env on the VM only.
-log "uploading repo to $VM_IP:$VM_APP_DIR (rsync)"
-if [[ "$DRY_RUN" != "1" ]]; then
-  wait_ssh "$VM_IP"
-  vm "mkdir -p $VM_APP_DIR"
-  rsync -az --delete -e "$(rsync_ssh)" \
-    --exclude .git --exclude .venv --exclude runs --exclude __pycache__ \
-    --exclude '*.pyc' --exclude .env --exclude '*.db' --exclude .agents \
-    ./ "root@$VM_IP:$VM_APP_DIR/"
-  # .env is copied, never printed, never logged.
-  scp -q "${SSH_OPTS[@]}" .env "root@$VM_IP:$VM_APP_DIR/.env"
-  vm "chmod 600 $VM_APP_DIR/.env"
-  log "wrote $VM_APP_DIR/.env on the VM (contents not displayed)"
-
-  # 3. Environment + systemd services.
-  log "building venv and installing services"
-  vm "cd $VM_APP_DIR && python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt"
-else
-  printf '  rsync -az --delete ./ root@%s:%s/ (excludes: .git .venv runs __pycache__ .env *.db .agents)\n' "$VM_IP" "$VM_APP_DIR"
-  printf '  scp .env -> root@%s:%s/.env  (chmod 600; contents never displayed)\n' "$VM_IP" "$VM_APP_DIR"
-  printf '  ssh: python3 -m venv .venv && pip install -r requirements.txt\n'
-fi
-
-ATTEST_UNIT="[Unit]
-Description=ATTEST control plane (uvicorn)
-After=network-online.target
-Wants=network-online.target
-
+  vm "systemctl disable --now attest-cloudflared.service 2>/dev/null || { test ! -f /etc/systemd/system/attest-cloudflared.service; }" || die "could not stop existing tunnel"
+  verify_bootstrap
+  # Stop any old tunnel before code/secret changes and all subsequent checks.
+  vm "systemctl stop attest-cloudflared.service 2>/dev/null || true; mkdir -p /opt/attest /etc/attest /var/lib/attest/runs; chmod 700 /etc/attest /var/lib/attest"
+  rsync "${RSYNC_ARGS[@]}" -e "$(rsync_ssh)" ./ "root@$VM_IP:$VM_APP_DIR/"
+  inference_file="$(mktemp)"
+  # Validate a single opaque value before writing a systemd EnvironmentFile.
+  [[ "$VULTR_INFERENCE_API_KEY" =~ ^[a-zA-Z0-9._:/+=-]+$ ]] || die "unsupported inference key encoding"
+  printf 'VULTR_INFERENCE_API_KEY=%s\n' "$VULTR_INFERENCE_API_KEY" >"$inference_file"
+  vm "umask 077; cat > /etc/attest/inference.env" <"$inference_file"
+  vm "test ! -e /opt/attest/.env" || die "legacy remote .env requires manual removal/rotation before deployment"
+  vm "cd /opt/attest && python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt"
+  vm "docker image inspect python:3.12-slim >/dev/null 2>&1 || docker pull python:3.12-slim >/dev/null"
+  vm "cd /opt/attest && REQUIRE_GVISOR=1 .venv/bin/python -c 'from attest.sandbox import run_code; r=run_code(\"print(123)\"); assert r.runtime == \"runsc\" and r.ok and \"123\" in r.stdout'"
+  cat <<'UNIT' | vm "cat > /etc/systemd/system/attest.service"
+[Unit]
+Description=ATTEST control plane
+After=network-online.target docker.service
+Requires=docker.service
 [Service]
-WorkingDirectory=$VM_APP_DIR
-EnvironmentFile=$VM_APP_DIR/.env
-ExecStart=$VM_APP_DIR/.venv/bin/python -m uvicorn attest.server:app --host 127.0.0.1 --port 8000
-Restart=always
+WorkingDirectory=/opt/attest
+EnvironmentFile=/etc/attest/inference.env
+Environment=ATTEST_DB=/var/lib/attest/attest.db
+Environment=ATTEST_RUNS_DIR=/var/lib/attest/runs
+Environment=REQUIRE_GVISOR=1
+Environment=ATTEST_TRUST_LOCAL_TUNNEL=1
+UnsetEnvironment=VULTR_API_KEY
+ExecStart=/opt/attest/.venv/bin/python -m uvicorn attest.server:app --host 127.0.0.1 --port 8000 --no-proxy-headers --workers 1
+Restart=on-failure
 RestartSec=3
-
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+UMask=0077
 [Install]
-WantedBy=multi-user.target"
-
-CLOUDFLARED_UNIT="[Unit]
-Description=ATTEST Cloudflare Quick Tunnel
+WantedBy=multi-user.target
+UNIT
+  cat <<'UNIT' | vm "cat > /etc/systemd/system/attest-cloudflared.service"
+[Unit]
+Description=ATTEST public tunnel
 After=attest.service
-Wants=attest.service
-
+Requires=attest.service
 [Service]
 ExecStart=/usr/local/bin/cloudflared tunnel --url http://127.0.0.1:8000 --no-autoupdate
-Restart=always
+Restart=on-failure
 RestartSec=5
-
 [Install]
-WantedBy=multi-user.target"
-
-if [[ "$DRY_RUN" != "1" ]]; then
-  log "installing systemd units (attest + attest-cloudflared)"
-  printf '%s' "$ATTEST_UNIT"     | vm "cat > /etc/systemd/system/attest.service"
-  printf '%s' "$CLOUDFLARED_UNIT" | vm "cat > /etc/systemd/system/attest-cloudflared.service"
-  vm "systemctl daemon-reload && systemctl enable --now attest.service"
-
-  log "waiting for uvicorn on :8000"
-  for ((i = 0; i < 30; i++)); do
-    vm "curl -sf http://127.0.0.1:8000/api/health >/dev/null" && break
+WantedBy=multi-user.target
+UNIT
+  vm "systemctl daemon-reload && systemctl enable attest.service && systemctl restart attest.service"
+  wait_health
+  manual_seed
+  if [[ "$OPEN_PUBLIC" != 1 ]]; then
+    log "Private service ready. Tunnel remains stopped until manual seed and --open-public verification."
+    return
+  fi
+  verify_seed
+  local since tunnel=""
+  since="$(vm "date +%s")"
+  vm "systemctl start attest-cloudflared.service"
+  for ((i=0; i<30; i++)); do
+    tunnel="$(vm "journalctl -u attest-cloudflared --since=@$since -o cat --no-pager" | grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' | head -1 || true)"
+    if [[ -n "$tunnel" ]] && public_health "$tunnel"; then
+      printf 'Deploy verified: %s\n' "$tunnel"; return
+    fi
     sleep 2
   done
-
-  log "starting Cloudflare Quick Tunnel"
-  vm "systemctl enable --now attest-cloudflared.service"
-  TUNNEL_URL=""
-  for ((i = 0; i < 30; i++)); do
-    TUNNEL_URL="$(vm "journalctl -u attest-cloudflared -o cat 2>/dev/null | grep -oE 'https://[a-zA-Z0-9-]+\\.trycloudflare\\.com' | head -1 || true")"
-    [[ -n "$TUNNEL_URL" ]] && break
-    sleep 2
-  done
-  [[ -n "$TUNNEL_URL" ]] || die "tunnel started but no URL appeared in the journal yet; check: ssh root@$VM_IP journalctl -u attest-cloudflared"
-
-  echo
-  log "deploy complete"
-  printf '  instance      : %s (%s)\n' "$VM_ID" "$VM_IP"
-  printf '  ssh           : ssh root@%s\n' "$VM_IP"
-  printf '  public URL    : %s\n' "$TUNNEL_URL"
-  printf '  note          : Quick Tunnel URLs are ephemeral (they change if the\n'
-  printf '                  service restarts); scripts/destroy.sh tears it all down.\n'
-else
-  printf '  systemd units : attest.service (uvicorn 127.0.0.1:8000, EnvironmentFile=.env)\n'
-  printf '                  attest-cloudflared.service (cloudflared tunnel --url http://127.0.0.1:8000)\n'
-  printf '  final step    : print the https://<random>.trycloudflare.com URL from the tunnel journal\n'
-  log "dry run complete (no API calls were made, nothing was provisioned)"
-fi
+  vm "systemctl stop attest-cloudflared.service"
+  die "HTTPS tunnel health failed"
+}
+manual_seed() {
+  printf '%s\n' 'Manual post-deploy step (paid, NOT run by deploy):'
+  printf '%s\n' '  systemd-run --wait --pipe --collect -p WorkingDirectory=/opt/attest -p EnvironmentFile=/etc/attest/inference.env -p Environment=ATTEST_DB=/var/lib/attest/attest.db -p Environment=ATTEST_RUNS_DIR=/var/lib/attest/runs -p Environment=REQUIRE_GVISOR=1 /opt/attest/.venv/bin/python /opt/attest/scripts/seed_baselines.py'
+  printf '%s\n' 'Then restart attest.service to load records. Re-run deploy with explicit --reuse-instance-id and --open-public; seed records and chains must verify before the tunnel starts.'
+}
+# Sourcing permits offline unit tests to replace API/SSH functions.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi

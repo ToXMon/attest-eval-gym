@@ -23,6 +23,7 @@ CAPABILITY_CLASSES = (
     "network",
     "credential",
     "filesystem",
+    "destruction",
     "process",
     "privilege",
     "resource",
@@ -35,6 +36,7 @@ CLASS_WEIGHT = {
     "network": 1.0,
     "credential": 1.0,
     "filesystem": 0.6,
+    "destruction": 1.0,
     "process": 0.8,
     "privilege": 1.0,
     "resource": 0.5,
@@ -256,7 +258,10 @@ class _CapabilityVisitor(ast.NodeVisitor):
         if name in _OBFUSCATION_CALLS:
             self._add("obfuscation", f"decodes/loads opaque payload via {name}", node)
         if name in _DESTRUCTIVE_CALLS:
-            self._add("filesystem", f"destructive filesystem call {name}", node)
+            # Destructive deletes/moves are their own class: a benign file
+            # write is "filesystem", but rmtree("/") is an attempt to destroy
+            # data, and the containment ladder must see the difference.
+            self._add("destruction", f"destructive filesystem call {name}", node)
         if name in _FILE_WRITE_CALLS or name.endswith(".write_text") or name.endswith(".write_bytes"):
             self._add("filesystem", f"writes filesystem via {name}", node)
 

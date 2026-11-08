@@ -19,6 +19,8 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
 
+from .provider_policy import provider_opener, validate_provider_url
+
 BASE_URL = os.environ.get("VULTR_INFERENCE_BASE_URL", "https://api.vultrinference.com/v1")
 API_KEY = os.environ.get("VULTR_INFERENCE_API_KEY", "")
 
@@ -34,8 +36,8 @@ MODEL_SAFETY = "nemotron-3.5-content-safety"
 MODEL_DECIDER = "glm-5.3-flash"
 
 
-class InferenceError(RuntimeError):
-    pass
+from .errors import (PublicError as InferenceError, safe_error,
+                     reject_secret_output, redact_value)
 
 
 @dataclass
@@ -67,15 +69,20 @@ class Completion:
 
 def _post(path: str, payload: dict, *, timeout: int = 120, retries: int = 3) -> dict:
     if not API_KEY:
-        raise InferenceError(
-            "VULTR_INFERENCE_API_KEY is not set. Create a Serverless Inference "
-            "subscription in the Vultr console and export the key."
-        )
-    url = f"{BASE_URL.rstrip('/')}/{path.lstrip('/')}"
+        raise InferenceError("provider_missing_key")
+    url = f"{validate_provider_url(BASE_URL)}/{path.lstrip('/')}"
     data = json.dumps(payload).encode("utf-8")
     last_err: Exception | None = None
 
+    from .admission import SPEND
+    # UTF-8 bytes conservatively bound prompt tokens; reserve output too.
+    output_cap = int(payload.get("max_tokens") or 4096)
+    payload["max_tokens"] = output_cap
+    data = json.dumps(payload).encode("utf-8")
+    model = str(payload.get("model", ""))
+    estimate = estimate_cost_usd(model, len(data) + output_cap)
     for attempt in range(retries):
+        ticket = SPEND.reserve(estimate)
         req = urllib.request.Request(
             url,
             data=data,
@@ -87,18 +94,22 @@ def _post(path: str, payload: dict, *, timeout: int = 120, retries: int = 3) -> 
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return json.loads(resp.read().decode("utf-8"))
+            with provider_opener().open(req, timeout=timeout) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+                tokens = max(0, int((result.get("usage") or {}).get("total_tokens") or 0))
+                SPEND.settle(ticket, estimate_cost_usd(model, tokens))
+                return result
         except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", "replace")[:400]
-            last_err = InferenceError(f"{exc.code} from {path}: {body}")
-            if exc.code in (400, 401, 403, 404):
-                raise last_err  # not worth retrying
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
-            last_err = InferenceError(f"network error calling {path}: {exc}")
+            last_err = InferenceError("provider_http_error", exc.code)
+            if 300 <= exc.code < 400 or exc.code in (400, 401, 403, 404):
+                raise last_err from None
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            last_err = InferenceError("provider_network_error")
+        except Exception:
+            raise InferenceError("provider_invalid_response") from None
         time.sleep(1.5 * (attempt + 1))
 
-    raise last_err or InferenceError(f"failed to call {path}")
+    raise last_err or InferenceError("provider_request_failed")
 
 
 def _usage_from(raw: dict) -> Usage:
@@ -162,9 +173,9 @@ def chat(
     t0 = time.time()
     raw = _post("chat/completions", payload, timeout=timeout, retries=retries)
     latency_ms = int((time.time() - t0) * 1000)
-    usage = _usage_from(raw)
-    _meter_call(model, usage.total_tokens)
     try:
+        usage = _usage_from(raw)
+        _meter_call(model, usage.total_tokens)
         msg = raw["choices"][0]["message"]
         text = msg.get("content") or ""
         if not text.strip():
@@ -172,10 +183,11 @@ def chat(
             # and leave `content` empty; the reasoning text is better than
             # nothing (usage remains the authoritative token count).
             text = msg.get("reasoning") or ""
-    except (KeyError, IndexError, TypeError) as exc:
-        raise InferenceError(f"unexpected response shape: {str(raw)[:300]}") from exc
-    return Completion(text=text, model=model, usage=usage,
-                      latency_ms=latency_ms, raw=raw)
+    except (KeyError, IndexError, TypeError, ValueError, AttributeError):
+        raise InferenceError("provider_invalid_response") from None
+    reject_secret_output(text, API_KEY)
+    return Completion(text=text, model=redact_value(model, (API_KEY,)), usage=usage,
+                      latency_ms=latency_ms, raw=redact_value(raw, (API_KEY,)))
 
 
 def chat_json(
@@ -207,7 +219,7 @@ def chat_json(
 def parse_json(text: str) -> Any:
     """Best-effort extraction of a JSON value from model output."""
     if text is None:
-        raise InferenceError("empty model output")
+        raise InferenceError("provider_invalid_response")
     raw = text.strip()
 
     try:
@@ -257,21 +269,21 @@ def parse_json(text: str) -> Any:
                         return json.loads(raw[start:i + 1])
                     except json.JSONDecodeError:
                         break
-    raise InferenceError(f"model output was not valid JSON: {raw[:200]}")
+    raise InferenceError("provider_invalid_response")
 
 
 def list_models() -> list[dict]:
     """Public model catalogue (no key required upstream, but we use ours anyway)."""
-    req = urllib.request.Request(f"{BASE_URL.rstrip('/')}/models", headers={"Accept": "application/json"})
+    req = urllib.request.Request(f"{validate_provider_url(BASE_URL)}/models", headers={"Accept": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with provider_opener().open(req, timeout=30) as resp:
             return json.loads(resp.read().decode("utf-8")).get("data", [])
     except Exception:
         return []
 
 
 def probe(model: str = MODEL_SUITE) -> dict:
-    """Check that the endpoint and the model answer. Used by the health endpoint.
+    """Explicit paid diagnostic; never called by the public health endpoint.
 
     max_tokens is generous because reasoning models spend part of the budget
     on the `reasoning` field before writing `content`."""
@@ -281,7 +293,7 @@ def probe(model: str = MODEL_SUITE) -> dict:
         return {"model": model, "ok": bool(resp.text), "sample": resp.text.strip()[:40],
                 "usage": resp.usage.to_dict(), "latency_ms": resp.latency_ms}
     except Exception as exc:
-        return {"model": model, "ok": False, "error": str(exc)[:200]}
+        return {"model": model, "ok": False, "error": safe_error(exc)}
 
 
 # --- cost -----------------------------------------------------------------------
@@ -337,7 +349,7 @@ def safety_annotate(code: str, *, model: str = MODEL_SAFETY) -> dict:
     if key in _SAFETY_CACHE:
         hit = dict(_SAFETY_CACHE[key])
         hit["cached"] = True
-        return hit
+        return redact_value(hit, (API_KEY,))
     out = {"safe": None, "risk": "not annotated", "model": model, "cached": False}
     if not code:
         out["risk"] = "no code produced"
@@ -360,8 +372,9 @@ def safety_annotate(code: str, *, model: str = MODEL_SAFETY) -> dict:
                "risk": str(data.get("risk", ""))[:200],
                "model": model, "cached": False}
     except Exception as exc:
-        out = {"safe": None, "risk": f"annotation unavailable: {str(exc)[:120]}",
+        out = {"safe": None, "risk": safe_error(exc),
                "model": model, "cached": False}
+    out = redact_value(out, (API_KEY,))
     _SAFETY_CACHE[key] = dict(out)
     return out
 

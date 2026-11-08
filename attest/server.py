@@ -17,8 +17,10 @@ import time
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
+from .admission import AdmissionMiddleware, MAX_TASKS
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -29,15 +31,34 @@ from .ledger import Ledger
 from .sandbox import detect_runtime
 from .tasks import SEEDED_SUITE, Task, generate_suite
 from .gym import suite_version
+from .errors import safe_error, redact_value
+from .provider_policy import validate_provider_url
 
 HERE = Path(__file__).resolve().parent
 WEB_DIR = HERE / "web"
-RUNS_DIR = HERE.parent / "runs"
+RUNS_DIR = Path(os.environ.get("ATTEST_RUNS_DIR", str(HERE.parent / "runs")))
 RUNS_DIR.mkdir(exist_ok=True)
 
 LEDGER = Ledger(os.environ.get("ATTEST_DB", str(RUNS_DIR.parent / "attest.db")))
 
 app = FastAPI(title="ATTEST — Eval Gym", version="0.1.0")
+app.add_middleware(AdmissionMiddleware)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_response(request, exc):
+    return JSONResponse(status_code=422, content={"error": "invalid_request", "status": 422})
+
+
+@app.exception_handler(HTTPException)
+async def http_error_response(request, exc):
+    return JSONResponse(status_code=exc.status_code,
+                        content={"error": "invalid_request", "status": exc.status_code})
+
+
+@app.exception_handler(Exception)
+async def unexpected_error_response(request, exc):
+    return JSONResponse(status_code=500, content={"error": "internal_error", "status": 500})
 
 # --- in-memory state ------------------------------------------------------------
 
@@ -45,22 +66,49 @@ RUNS: dict[str, gym.RunResult] = {}
 SUITES: dict[str, list[Task]] = {}
 SUITE_META: dict[str, dict] = {}
 STREAMS: dict[str, queue.Queue] = {}
+RUN_STATUS: dict[str, dict] = {}
+RUN_ALIASES: dict[str, str] = {}
 
-# Load runs persisted by an earlier process so the leaderboard survives a restart.
-for path in sorted(RUNS_DIR.glob("*.json")):
-    try:
-        data = json.loads(path.read_text())
-    except Exception:
-        continue
-    run = gym.run_from_dict(data)
-    if run is not None:
-        RUNS[run.run_id] = run
+def load_persisted_runs(directory: Path) -> dict[str, gym.RunResult]:
+    """Load only post-redaction records; preserve all others outside public state.
+
+    The schema is a local writer provenance marker, not a signature. Never
+    upgrade legacy content by stamping it or rewriting ledger/evidence.
+    """
+    loaded = {}
+    for path in sorted(directory.glob("*.json")):
+        run = None
+        try:
+            if not path.is_symlink():
+                data = json.loads(path.read_text())
+                run = gym.run_from_dict(data)
+                if run is not None and path.name != run.run_id + ".json":
+                    run = None
+        except Exception:
+            run = None
+        if run is None:
+            quarantine = directory / "quarantine"
+            quarantine.mkdir(mode=0o700, exist_ok=True)
+            if quarantine.is_symlink():
+                raise RuntimeError("unsafe_quarantine_directory")
+            quarantine.chmod(0o700)
+            destination = quarantine / (uuid.uuid4().hex + ".json")
+            path.rename(destination)
+            if not destination.is_symlink():
+                destination.chmod(0o600)
+            # No contents, filenames, credentials, or exception text are logged.
+            continue
+        loaded[run.run_id] = run
+    return loaded
+
+
+RUNS.update(load_persisted_runs(RUNS_DIR))
 
 
 # --- request models -------------------------------------------------------------
 
 class SuiteRequest(BaseModel):
-    topic: str = "data analysis and reporting"
+    topic: str = Field(default="data analysis and reporting", max_length=2000)
     generate: bool = False
     n_task: int = Field(default=4, ge=1, le=12)
     n_adversarial: int = Field(default=3, ge=1, le=12)
@@ -71,7 +119,7 @@ class CustomAgent(BaseModel):
     name: str = "dropped-in agent"
     base_url: str
     model: str
-    api_key: str = ""
+    api_key: str = Field(default="", repr=False)
     style: str = "compliant"
 
 
@@ -79,7 +127,7 @@ class EndpointSpec(BaseModel):
     """An OpenAI-compatible endpoint for a dropped-in agent."""
     base_url: str
     model: str = ""
-    api_key: str = ""
+    api_key: str = Field(default="", repr=False)
     style: str = "compliant"
 
 
@@ -92,7 +140,7 @@ class AgentPayload(BaseModel):
 class RunRequest(BaseModel):
     # Frozen shape (docs/adal/spec.md): {agent: {endpoint?, name}, tasks?: [ids]}
     agent: AgentPayload | None = None
-    tasks: list[str] | None = None
+    tasks: list[str] | None = Field(default=None, max_length=MAX_TASKS)
     # Legacy shape, still accepted so the existing UI keeps working.
     agent_id: str | None = None
     custom: CustomAgent | None = None
@@ -108,6 +156,14 @@ class PromoteRequest(BaseModel):
 # --- helpers --------------------------------------------------------------------
 
 def _agent_for(req: RunRequest) -> AgentSpec:
+    for endpoint in (req.agent.endpoint if req.agent else None, req.custom):
+        if endpoint is not None:
+            try:
+                validate_provider_url(endpoint.base_url)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if not endpoint.api_key.strip():
+                raise HTTPException(status_code=400, detail="Custom endpoint evaluations require your own API key; server credentials are not used.")
     refs = reference_agents()
     if req.agent is not None:
         a = req.agent
@@ -158,10 +214,14 @@ def _suite_for(req: RunRequest) -> tuple[list[Task], str]:
         if missing:
             raise HTTPException(status_code=400, detail=f"unknown task ids: {missing}")
         tasks = [by_id[tid] for tid in req.tasks]
+    if len(tasks) > MAX_TASKS or len({t.id for t in tasks}) != len(tasks):
+        raise HTTPException(status_code=400, detail="task limit")
     return tasks, source
 
 
 def _persist(run: gym.RunResult) -> None:
+    if run.publication_schema != 1:
+        raise ValueError("unsafe_run_publication_schema")
     try:
         (RUNS_DIR / f"{run.run_id}.json").write_text(json.dumps(run.to_dict(), indent=2))
     except Exception:
@@ -180,7 +240,7 @@ def health():
     return {
         "ok": True,
         "runtime": detect_runtime(),
-        "inference": llm.probe(),
+        "inference": {"configured": bool(llm.API_KEY), "checked": False},
         "suite_version": suite_version(list(SEEDED_SUITE)),
         "attacks": len(ATTACK_CORPUS),
         "runs": len(RUNS),
@@ -215,6 +275,8 @@ def seeded_suite():
 def make_suite(req: SuiteRequest):
     if not req.generate:
         return seeded_suite()
+    if req.n_task + req.n_adversarial + req.n_containment > MAX_TASKS:
+        raise HTTPException(status_code=400, detail="task limit")
     tasks = generate_suite(
         req.topic,
         n_task=req.n_task,
@@ -227,6 +289,10 @@ def make_suite(req: SuiteRequest):
         # rather than showing an empty gym.
         tasks = list(SEEDED_SUITE)
         source = "seeded-fallback"
+    if len(tasks) > MAX_TASKS:
+        raise HTTPException(status_code=400, detail="task limit")
+    if len(SUITES) >= 100:
+        raise HTTPException(status_code=429, detail="suite cache limit")
     sid = f"{source}-{uuid.uuid4().hex[:8]}"
     SUITES[sid] = tasks
     SUITE_META[sid] = {"source": source, "version": suite_version(tasks)}
@@ -235,12 +301,14 @@ def make_suite(req: SuiteRequest):
 
 
 @app.post("/api/run")
-def start_run(req: RunRequest):
+def start_run(req: RunRequest, request: Request = None):
+    lease = getattr(request.state, "admission_lease", None) if request else None
     agent = _agent_for(req)
     tasks, source = _suite_for(req)
     run_id = f"run-{uuid.uuid4().hex[:12]}"
     q: queue.Queue = queue.Queue()
     STREAMS[run_id] = q
+    RUN_STATUS[run_id] = {"run_id": run_id, "status": "running", "tasks": []}
 
     def emit(event: dict) -> None:
         q.put(event)
@@ -251,16 +319,29 @@ def start_run(req: RunRequest):
             run.public = req.public
             RUNS[run.run_id] = run
             _persist(run)
+            RUN_ALIASES[run_id] = run.run_id
+            RUN_STATUS.pop(run_id, None)
             emit({"type": "run_stored", "run_id": run.run_id})
         except Exception as exc:  # pragma: no cover
-            emit({"type": "run_error", "error": f"{type(exc).__name__}: {exc}"})
+            error = safe_error(exc, "run_worker_failed")
+            RUN_STATUS[run_id] = {"run_id": run_id, "status": "failed", "error": error, "tasks": []}
+            emit({"type": "run_error", "error": error})
         finally:
+            if lease:
+                lease.release()
             time.sleep(0.2)
             q.put(None)
 
-    threading.Thread(target=worker, daemon=True).start()
-    return {"run_id": run_id, "agent": agent.to_dict(), "suite_source": source,
-            "task_count": len(tasks)}
+    if lease:
+        lease.transferred = True
+    try:
+        threading.Thread(target=worker, daemon=True).start()
+    except Exception:
+        if lease:
+            lease.release()
+        raise
+    return redact_value({"run_id": run_id, "agent": agent.to_dict(), "suite_source": source,
+                         "task_count": len(tasks)}, (llm.API_KEY, agent.api_key))
 
 
 @app.get("/api/run/{run_id}/events")
@@ -286,8 +367,10 @@ async def stream_events(run_id: str):
 
 @app.get("/api/run/{run_id}")
 def get_run(run_id: str):
-    """The frozen 4-layer scorecard shape (docs/adal/spec.md)."""
-    run = RUNS.get(run_id)
+    """The frozen 4-layer scorecard shape, or status while work is pending."""
+    if run_id in RUN_STATUS:
+        return RUN_STATUS[run_id]
+    run = RUNS.get(RUN_ALIASES.get(run_id, run_id))
     if run is None:
         raise HTTPException(status_code=404, detail="unknown run")
     return gym.run_view(run, list(RUNS.values()))
@@ -349,7 +432,8 @@ def promote_regression(req: PromoteRequest):
 
 @app.get("/api/regression/cases")
 def regression_cases():
-    return {"cases": LEDGER.regression_cases()}
+    return {"cases": [case for case in LEDGER.regression_cases()
+                      if case.get("run_id") in RUNS]}
 
 
 @app.get("/api/compare")
@@ -363,8 +447,10 @@ def compare(base: str, head: str):
 @app.get("/api/evidence/{run_id}")
 def evidence(run_id: str):
     """The downloadable evidence pack: the full hash-chained history."""
+    if run_id not in RUNS:
+        raise HTTPException(status_code=404, detail="unknown run")
     pack = LEDGER.export(run_id)
-    pack["scorecard"] = RUNS[run_id].scorecard() if run_id in RUNS else None
+    pack["scorecard"] = RUNS[run_id].scorecard()
     return pack
 
 
