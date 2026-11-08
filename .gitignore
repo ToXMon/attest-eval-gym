@@ -20,3 +20,4 @@ screenshot*.jpg
 .DS_Store
 artifacts/
 runs/
+ops_state/

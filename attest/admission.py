@@ -112,7 +112,9 @@ class AdmissionMiddleware:
 
     async def __call__(self, scope, receive, send):
         protected = ((scope.get("method"), scope.get("path")) in {
-            ("POST", "/api/run"), ("POST", "/api/suite"), ("GET", "/api/selftest")})
+            ("POST", "/api/run"), ("POST", "/api/suite"), ("GET", "/api/selftest"),
+            ("POST", "/api/ops/demo/start"), ("POST", "/api/ops/cancel"),
+            ("POST", "/api/ops/replay"), ("POST", "/api/ops/requote")})
         if scope["type"] != "http" or not protected:
             return await self.app(scope, receive, send)
         peer = (scope.get("client") or ("unknown",))[0]

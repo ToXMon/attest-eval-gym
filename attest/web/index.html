@@ -295,6 +295,7 @@ noscript p{padding:16px 32px;margin:0;border-bottom:1px solid var(--line)}
   <button class="t" data-t="scorecard" aria-controls="s-scorecard" type="button">Scorecard</button>
   <button class="t" data-t="evals" aria-controls="s-evals" type="button">Compare</button>
   <button class="t" data-t="evidence" aria-controls="s-evidence" type="button">Evidence</button>
+  <button class="t" data-t="agent" aria-controls="s-agent" type="button">Agent Demo</button>
 </div></nav>
 
 <!-- LEADERBOARD -->
@@ -352,6 +353,23 @@ noscript p{padding:16px 32px;margin:0;border-bottom:1px solid var(--line)}
   <dl class="facts" id="ev-sum"></dl>
   <div id="ev-otel"></div>
   <pre id="ev-out" tabindex="0" aria-label="Evidence JSON">Select a run.</pre>
+</div></section>
+
+<!-- AGENT DEMO (operational slice; additive per ADR 0004; distinct from returned-code evals) -->
+<section class="view hidden" id="s-agent"><div class="wrap">
+  <div class="vhead"><h2>Operational Agent Demo</h2><span class="mono muted" id="ag-runid"></span></div>
+  <p class="note">The ATTEST Procurement Agent runs a real bounded loop: real Vultr inference decides each step, model-generated Python computes the quote comparison inside the gVisor sandbox, and an independent broker enforces approval, budget, seller and version fences before any order commits. <b>Test merchant &middot; no real charge.</b> Approval is a server-side test harness (<b>Test-harness approval</b>): the model may request it, never grant it. Boundary: only generated analysis code runs inside gVisor; orchestration and broker are trusted control-plane code outside it. These operational runs are a separate evaluation mode and are not ranked against the returned-code baselines.</p>
+  <div class="runbar">
+    <button class="btn primary" id="ag-start-benign" type="button">Run benign procurement demo</button>
+    <button class="btn" id="ag-start-injection" type="button">Run injection scenario</button>
+    <button class="btn" id="ag-start-probe" type="button">Run isolation probe (scripted)</button>
+  </div>
+  <p class="small muted" id="ag-status">Idle. Pending stages stay pending until actual events arrive; nothing is simulated.</p>
+  <h3>Live stages</h3>
+  <div id="ag-stages"><div class="empty">No run started. Stages appear here as the service records them.</div></div>
+  <h3>Findings</h3>
+  <div id="ag-findings"><div class="empty">Task outcome / Agent policy behavior / Enforcement / Sandbox evidence / Reliability findings appear after grading.</div></div>
+  <div class="task-actions" id="ag-links"></div>
 </div></section>
 </main>
 
@@ -774,6 +792,135 @@ $("#b-selftest").onclick=async()=>{
     });
   }catch(e){toast("Selftest failed: "+e.message)}
 };
+</script>
+<script>
+/* ---- Operational Agent Demo (additive; separate evaluation mode; ADR 0004) ----
+   Real stages only: every row updates from an actual persisted server event
+   (SSE stream backed by the on-disk ops store). No timers, no simulation. */
+VIEWS.push("agent");
+const AG_STAGE_DEFS=[
+  ["run_started","Run started"],
+  ["catalog_observed","Catalog observation"],
+  ["quotes_observed","Quote retrieval"],
+  ["analysis_executed","Generated-code analysis \u00b7 sandbox completion"],
+  ["approval_requested","Approval requested (model request only)"],
+  ["approval_state","Approval state (Test-harness approval)"],
+  ["broker_decision","Broker decision"],
+  ["order_receipt","Order receipt (Test merchant \u00b7 no real charge)"],
+  ["status_checked","Order status / reconciliation"],
+  ["grading","Deterministic grading"],
+  ["probe_started","Probe started (scripted \u2014 not a model decision)"],
+  ["probe_executed","Probe executed \u00b7 sandbox isolation"],
+  ["run_finished","Run finished"],
+];
+let agRunId=null, agES=null, agSeen={};
+function agReset(runId,scenario){
+  agRunId=runId;agSeen={};
+  $("#ag-runid").textContent=runId;
+  $("#ag-status").textContent="Running "+scenario+" \u2026 events arrive from the service as stages complete.";
+  const probe=scenario.startsWith("probe");
+  const defs=probe?AG_STAGE_DEFS.filter(d=>d[0].startsWith("probe")||d[0]==="run_finished")
+    :AG_STAGE_DEFS.filter(d=>!d[0].startsWith("probe"));
+  $("#ag-stages").innerHTML=defs.map(([k,label])=>
+    `<div class="task pending" id="agst-${k}"><div class="hd"><span class="sl">${esc(label)}</span><span class="vd">pending</span></div><div class="bd"><div class="lines muted">Awaiting the actual server event.</div></div></div>`).join("");
+  $("#ag-findings").innerHTML='<div class="empty">Unknown until grading completes.</div>';
+  const base="/api/ops/run/"+encodeURIComponent(runId);
+  $("#ag-links").innerHTML=`<a href="${esc(base)}" target="_blank" rel="noopener">Run JSON</a>`+
+    `<a href="${esc(base+"/events")}" target="_blank" rel="noopener">Durable events</a>`+
+    `<a href="${esc(base+"/evidence")}" target="_blank" rel="noopener">Evidence pack</a>`;
+}
+function agSummary(kind,p){
+  switch(kind){
+    case "run_started":return `model ${esc(p.model||"")} via Vultr serverless inference \u00b7 budget ${p.budget_minor} ${esc(p.currency||"")} minor \u00b7 ${esc(p.merchant||"")}`;
+    case "catalog_observed":return `${p.item_count} catalog items observed; descriptions are untrusted data`;
+    case "quotes_observed":return `quote_version ${p.quote_version}, ${p.quote_count} itemized quotes (integer minor units)`;
+    case "analysis_executed":return `exit ${p.exit_code} \u00b7 runtime ${esc(p.runtime||"?")} \u00b7 ${fmtLat(p.duration_ms)} \u00b7 attempts ${p.attempts} \u00b7 quote_version ${esc(p.supplied_quote_version||"?")}`;
+    case "approval_requested":return `approval ${esc(p.approval_id)} pending; requested by the model, decided server-side`;
+    case "approval_state":return p.status==="granted"?`${esc(p.approval_id)} granted \u00b7 ${esc(p.authority_label||"Test-harness approval")}`:`${esc(p.approval_id)} ${esc(p.status)}`;
+    case "broker_decision":return p.committed?`committed order ${esc(p.order_id)}${p.replayed?" (replay of original result)":""}`:`rejected: ${esc(p.rejection?.code||"?")}`;
+    case "order_receipt":return `receipt ${esc(p.receipt_id)} \u00b7 Test merchant \u00b7 no real charge`;
+    case "status_checked":return p.found?`action ${esc(p.action_id)} reconciled to the committed order`:`action ${esc(p.action_id)} has no committed effect`;
+    case "grading":return `passed=${p.passed} \u00b7 outcome ${esc(p.outcome||"")}`;
+    case "probe_executed":return `${esc(p.attack_id)} contained=${p.contained} \u00b7 runtime ${esc(p.runtime||"?")} \u00b7 exit ${p.exit_code} \u00b7 canary_leaked=${p.canary_leaked}`;
+    case "run_finished":return `status ${esc(p.status)} \u00b7 orders ${p.order_count??0}${p.receipt_id?" \u00b7 receipt "+esc(p.receipt_id):""}`;
+    case "run_aborted":return `aborted: ${esc(p.code)}`;
+    default:return JSON.stringify(p).slice(0,220);
+  }
+}
+function agMark(kind,payload,ok){
+  const el=$("#agst-"+kind);if(!el)return;
+  el.className="task "+(ok?"pass":"fail");el.classList.add("open");
+  el.querySelector(".vd").textContent=ok?"DONE":"FAILED";
+  el.querySelector(".vd").className="vd "+(ok?"pass":"fail");
+  el.querySelector(".bd .lines").className="lines";
+  el.querySelector(".bd .lines").textContent=agSummary(kind,payload);
+  agSeen[kind]=payload;
+}
+function agRenderFindings(view){
+  const rec=view.record||{};
+  if(view.scenario&&String(view.scenario).startsWith("probe")){
+    const sb=rec.sandbox||{};
+    $("#ag-findings").innerHTML=`
+      <div class="defcol"><h3>Task outcome</h3><div class="radv">n/a</div><div class="cls small">Scripted isolation probe, not a procurement task. Not scored as procurement.</div></div>
+      <div class="defcol"><h3>Sandbox evidence</h3><div class="radv ${rec.contained?"":"esc"}">${rec.contained?"CONTAINED":"ESCAPED"}</div><div class="cls small">attack ${esc(rec.attack_id)} (${esc(rec.attack_class)}) \u00b7 runtime ${esc(sb.runtime||"?")} \u00b7 exit ${sb.exit_code} \u00b7 ${fmtLat(sb.duration_ms)} \u00b7 canary leaked: ${rec.canary_leaked?"YES":"no"} \u00b7 ${esc(rec.detector_evidence||"")}</div></div>
+      <div class="defcol"><h3>Boundary honesty</h3><div class="radv">scoped</div><div class="cls small">${esc(rec.scoping||"")} ${esc(rec.boundary||"")}</div></div>`;
+    return;
+  }
+  const ev=rec.evaluation||{};const sec=ev.sections||{};
+  const panels=[["task_outcome","Task outcome"],["agent_policy","Agent policy behavior"],["enforcement","Enforcement"],["sandbox_evidence","Sandbox evidence"],["reliability","Reliability findings"]];
+  const html=panels.map(([key,title])=>{
+    const s=sec[key];
+    if(!s)return `<div class="defcol"><h3>${title}</h3><div class="radv">unknown</div><div class="cls small">No grading recorded.</div></div>`;
+    const rows=(s.checks||[]).map(c=>`<div class="q${c.passed?"":" fail"}">${c.passed?"PASS":"FAIL"} \u00b7 ${esc(c.name)} \u2014 ${esc(c.detail||"")}</div>`).join("");
+    return `<div class="defcol"><h3>${title} <span class="${s.passed?"chain-ok":"chain-bad"}">${s.passed?"PASS":"FAIL"}</span></h3><div class="cls small">${esc(s.summary||"")}</div><div class="trajq">${rows}</div></div>`;
+  }).join("");
+  const orders=((rec.orders)||[]).map(o=>`<div class="q">order ${esc(o.order_id)} \u00b7 ${esc(o.params?.sku)} \u00b7 ${o.params?.total_minor} ${esc(o.params?.currency||"")} minor \u00b7 receipt ${esc(o.receipt_id)}</div>`).join("")||'<div class="q fail">no committed order</div>';
+  const usage=rec.usage||{};
+  const usageLine=usage.available?`${fmt(usage.total_tokens)} tokens \u00b7 ${usage.llm_calls} calls \u00b7 est. ${fmtCost(usage.estimated_cost_usd)} USD (estimate, not an invoice)`:"usage unavailable (never shown as zero)";
+  $("#ag-findings").innerHTML=`
+    <div class="defcol"><h3>Verdict</h3><div class="radv ${ev.passed?"":"esc"}">${ev.passed?"PASSED":"NOT PASSED"}</div><div class="cls small">outcome ${esc(ev.outcome||"unknown")} \u00b7 status ${esc(rec.status||view.status)} \u00b7 model ${esc(rec.model||view.model||"")}</div><div class="cls small">${esc(usageLine)}</div></div>
+    <div class="defcol"><h3>Broker state (authoritative)</h3>${orders}<div class="cls small">Test merchant \u00b7 no real charge. Grading recomputed from broker state at read time.</div></div>
+    ${html}`;
+}
+async function agFinish(view){
+  try{
+    const v=await api("/api/ops/run/"+encodeURIComponent(view.run_id||agRunId));
+    $("#ag-status").textContent=`Run ${v.run_id} finished with status ${v.status} \u00b7 chain ${v.chain_valid?"verified":"BROKEN"} \u00b7 ${v.merchant}`;
+    agRenderFindings(v);
+  }catch(e){$("#ag-status").textContent="Run finished but the record could not be loaded: "+e.message}
+}
+function agHandle(evt){
+  let p;try{p=JSON.parse(evt.data)}catch{return}
+  const kind=p.type;
+  if(kind==="run_state"){if(agES){agES.close();agES=null}agFinish(p);return}
+  if(kind==="run_error"){ $("#ag-status").textContent="Run error: "+(p.error||"unknown");return}
+  if(kind==="tool_rejected"){
+    const el=document.createElement("div");el.className="task fail open";
+    el.innerHTML=`<div class="hd"><span class="sl">Rejected action (fail closed)</span><span class="vd fail">REJECTED</span></div><div class="bd"><div class="lines">tool ${esc(p.tool)} \u00b7 ${esc(p.reason)}${p.detail?" \u00b7 "+esc(p.detail):""}</div></div>`;
+    $("#ag-stages").appendChild(el);return;
+  }
+  if(kind==="run_aborted"){ $("#ag-status").textContent="Run aborted: "+(p.code||"");return}
+  const ok=kind==="broker_decision"?!!p.committed:kind==="grading"?!!p.passed:kind==="probe_executed"?!!p.contained:true;
+  agMark(kind,p,ok);
+  if(kind==="run_finished"){if(agES){agES.close();agES=null}agFinish(p)}
+}
+async function agStart(scenario,btn){
+  $$("#s-agent .btn").forEach(b=>b.disabled=true);
+  try{
+    const started=await api("/api/ops/demo/start",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({scenario})});
+    agReset(started.run_id,scenario);
+    showView("agent");
+    agES=new EventSource("/api/ops/run/"+encodeURIComponent(started.run_id)+"/stream");
+    agES.onmessage=agHandle;
+    agES.onerror=()=>{if(agES){agES.close();agES=null}if(agRunId)agFinish({run_id:agRunId})};
+  }catch(e){
+    toast("Demo start failed: "+e.message);
+    $("#ag-status").textContent="Start failed: "+e.message;
+  }finally{$$("#s-agent .btn").forEach(b=>b.disabled=false)}
+}
+$("#ag-start-benign").onclick=e=>agStart("benign",e.target);
+$("#ag-start-injection").onclick=e=>agStart("injection",e.target);
+$("#ag-start-probe").onclick=e=>agStart("probe-credential",e.target);
 </script>
 </body>
 </html>

@@ -476,5 +476,11 @@ def selftest():
     }
 
 
+# Operational demo agent (ADR 0004): additive /api/ops namespace, its own
+# auth, broker-owned DB and durable ops store. Frozen /api shapes untouched.
+from .ops_router import router as ops_router  # noqa: E402
+
+app.include_router(ops_router)
+
 if WEB_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
