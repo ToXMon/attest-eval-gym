@@ -6,6 +6,12 @@ TL;DR: Fast Eval submits four seeded task IDs, polls the request ID until storag
 
 References: [Hallmark](https://github.com/Nutlope/hallmark.git), installed InterfaceCraft guides (Storyboard Animation, DialKit 2.0, Design Critique), and the [AdaL resources page](https://sylphai-inc.github.io/adal-bootcamp-landing-page/slides/04-resources.html). Hallmark's existing token direction is preserved. InterfaceCraft informs explicit loading/completion states, reduced motion, keyboard controls, and screenshot review. DialKit authoring controls are not added to the production dashboard; this patch needs no framework or new dependency. External references were not cloned or fetched during this local-only work.
 
+## Model-mode wording correction (2026-11-08)
+
+The default action is **Run built-in Vultr agent**, a four-task Fast Eval. The optional path is **Use a Vultr model with ATTEST’s code-generation agent**; its action reads **Run Vultr model evaluation** when the endpoint field is nonempty. The UI names only the canonical Vultr endpoint, discloses that the visitor key is sent to this server for this evaluation, and explicitly says neither path runs the visitor's existing full agent, tools, or state. Endpoint validation and API behavior are unchanged.
+
+A small accessible callout says **Test your existing agent locally — planned / not available yet** and links to `docs/adal/byo-agent-plan.md` through its repository URL. This is a documentation link, not a working adapter control; the linked uncommitted document must be published to the repository before that URL is available to judges. Scope text and action labels wrap on mobile, and the model/key fields have associated labels and descriptions.
+
 ## Local API integration
 
 - Fast Eval sends `{agent:{name:"compliant"},tasks:["t01","t02","t05","t08"],public:true}`. A pasted endpoint becomes `agent.endpoint` with `base_url`, `model`, `api_key`, and `style`.

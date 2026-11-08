@@ -210,6 +210,8 @@ select{max-width:100%;background:var(--paper-2);color:var(--ink);border:1px soli
 .task-actions{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:14px}
 .task-actions .promote{white-space:normal;text-align:left;min-height:44px}
 .byo{padding:14px}
+#model-scope,#key-disclosure{overflow-wrap:anywhere}
+.evalbar .btn{white-space:normal}
 .toast{max-width:min(400px,calc(100vw - 32px));overflow-wrap:anywhere}
 nav.tabs .t,.subtab{background:transparent;border:0;font-family:inherit}
 nav.tabs .t{border-bottom:2px solid transparent}
@@ -229,23 +231,29 @@ nav.tabs .t{border-bottom:2px solid transparent}
 
 <!-- HERO -->
 <div class="hero"><div class="wrap">
-  <h1>Drop your agent in.<br><span class="ac">Get a containment score.</span></h1>
+  <h1>Run a code-generation agent.<br><span class="ac">Score its sandboxed code.</span></h1>
   <p class="lead">A black-box sandboxed dynamometer for untrusted agents. Fast Eval runs four tasks, including an /etc/shadow probe, and reports the observed containment evidence. Run attack corpus separately to exercise the full attack set.</p>
   <div class="evalbar">
     <div class="field">
-      <label for="ep">Optional Vultr HTTPS endpoint (your API key required), or leave blank for a seeded agent</label>
-      <input id="ep" placeholder="https://api.vultrinference.com/v1" />
+      <label for="ep">Use a Vultr model with ATTEST’s code-generation agent (optional)</label>
+      <input id="ep" placeholder="https://api.vultrinference.com/v1" aria-describedby="model-scope" />
     </div>
-    <button class="btn" id="b-fasteval">⚡ 1-Click Fast Eval</button>
+    <button class="btn" id="b-fasteval">Run built-in Vultr agent</button>
     <button class="btn ghost" id="b-selftest">Run attack corpus</button>
   </div>
-  <details><summary>Bring your own agent (model + key)</summary>
+  <p class="kv" id="model-scope">Leave the endpoint blank to run the built-in Vultr agent (4-task Fast Eval). Only https://api.vultrinference.com/v1 is accepted for optional model mode. Both paths use ATTEST’s code-generation agent; this does NOT run your existing full agent, its tools, or its state.</p>
+  <details><summary>Use a Vultr model with ATTEST’s code-generation agent</summary>
     <div class="byo">
-      <div><label>Name</label><input id="c-name" value="my agent" /></div>
-      <div><label>Model</label><input id="c-model" placeholder="qwen3.8-flash" /></div>
-      <div><label>Your Vultr API key (sent to the server for this eval)</label><input id="c-key" type="password" /></div>
+      <div><label for="c-name">Evaluation name</label><input id="c-name" value="my model eval" /></div>
+      <div><label for="c-model">Vultr model</label><input id="c-model" placeholder="qwen3.8-flash" /></div>
+      <div><label for="c-key">Your Vultr API key</label><input id="c-key" type="password" aria-describedby="key-disclosure" /></div>
+      <p class="kv" id="key-disclosure">Your key is sent to this server for this evaluation. Optional model mode requires your own key; it does not use the server’s key.</p>
     </div>
   </details>
+  <aside class="nosecret" aria-label="Planned local adapter" style="margin-top:16px">
+    <b>Test your existing agent locally — planned / not available yet</b>
+    <p>This adapter is a proposal, not a working feature. It would run your agent locally and submit returned code for sandbox evaluation, not contain your agent’s own tool actions. <a href="https://github.com/ToXMon/attest-eval-gym/blob/master/docs/adal/byo-agent-plan.md">Read the local adapter plan</a>.</p>
+  </aside>
   <div class="statchips" id="chips"></div>
 </div></div>
 
@@ -268,7 +276,7 @@ nav.tabs .t{border-bottom:2px solid transparent}
       </tr></thead>
       <tbody id="board-body"></tbody>
     </table>
-    <div class="empty" id="board-empty">No runs yet. Press 1-Click Fast Eval to seed the board.</div>
+    <div class="empty" id="board-empty">No runs yet. Select Run built-in Vultr agent for a 4-task Fast Eval.</div>
   </div>
 </div></section>
 
@@ -370,6 +378,8 @@ $$(".t").forEach(t=>t.onclick=()=>{
 });
 
 /* ---- 1-Click Fast Eval ---- */
+function evalButtonLabel(){return $("#ep").value.trim()?"Run Vultr model evaluation":"Run built-in Vultr agent"}
+$("#ep").addEventListener("input",()=>{if(!$("#b-fasteval").disabled)$("#b-fasteval").textContent=evalButtonLabel()});
 $("#b-fasteval").onclick=async()=>{
   const btn=$("#b-fasteval");btn.disabled=true;btn.innerHTML='<span class="spin"></span>running…';
   const url=$("#ep").value.trim();
@@ -406,7 +416,7 @@ $("#b-fasteval").onclick=async()=>{
     $("#sc-sub").textContent="Fast Eval failed";
     $("#sc-layers").innerHTML=`<div class="empty" role="alert">${esc(e.message)}</div>`;
     toast("run failed: "+e.message);
-  }finally{btn.disabled=false;btn.textContent="⚡ 1-Click Fast Eval"}
+  }finally{btn.disabled=false;btn.textContent=evalButtonLabel()}
 };
 
 /* ---- leaderboard ---- */
